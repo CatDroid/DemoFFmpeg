@@ -6,11 +6,13 @@
  */
 
 #define LOG_TAG "AudioTrack"
+
+#include <project_utils.h>
 #include "jni_common.h"
 
 #include "AudioTrack.h"
 
-#define SAVE_DECODE_TO_FILE
+//#define SAVE_DECODE_TO_FILE
 
 #define AUDIO_RENDER_BUFFER_SIZE 10
 AudioTrack::AudioTrack():mStop(false),mStarted(false)
@@ -86,6 +88,12 @@ AudioTrack::AudioTrack():mStop(false),mStarted(false)
 		SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT, // SL_SPEAKER_FRONT_CENTER 是 单通道
 		SL_BYTEORDER_LITTLEENDIAN};
 
+	/*
+	if (channel == 2)
+		format_pcm.channelMask = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
+	else
+		format_pcm.channelMask = SL_SPEAKER_FRONT_CENTER;
+	*/
 
 	SLDataSource audioSrc = {&loc_bufq, &format_pcm};
 
@@ -152,23 +160,8 @@ AudioTrack::AudioTrack():mStop(false),mStarted(false)
 void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
 	SLresult result;
-	/* 推送另外的数据 Enqueue
-		接口 SLAndroidSimpleBufferQueueItf ID
-		SLresult (*Enqueue) (
-			SLAndroidSimpleBufferQueueItf self,
-			const void *pBuffer,        指向要播放的数据
-			SLuint32 size               要播放数据的大小
-		);
-
-		SL_RESULT_BUFFER_INSUFFICIENT 内存不足
-			the most likely other result is SL_RESULT_BUFFER_INSUFFICIENT,
-			which for this code example would indicate a programming error
-	 */
-	//ALOGD("playerCallback");// 不会在 SetPlayState(mIPlayerPlay, SL_PLAYSTATE_PLAYING);就回调的!
 	AudioTrack*  at = (AudioTrack*)context ;
 	at->playerCallback(bq);
-
-
 }
 
 void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
@@ -177,6 +170,7 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 	while(!mStop ){
 		AutoMutex l(mBufMux);
 		if(mBuf.empty()){
+			ALOGD("playerCallback wait ");
 			mBufCon->wait(mBufMux);
 			continue ;
 		}else{
@@ -197,26 +191,78 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 		return ;
 	}
 
-	ALOGD("play Enqueue %d " , playbuf->size() );
+	SLAndroidSimpleBufferQueueState state ;
+	(*mIPlayerBufferQueue)->GetState(mIPlayerBufferQueue , &state);
+
+	ALOGD("play Enqueue %d state count %d index %d " , playbuf->size() , state.count , state.index );
+	ALOGD("%02x %02x %02x %02x %02x %02x " ,
+		  playbuf->data()[0],
+		  playbuf->data()[1],
+		  playbuf->data()[2],
+		  playbuf->data()[3],
+		  playbuf->data()[4],
+		  playbuf->data()[5]);
 	SLresult result;
-	mCurrentPts = playbuf->pts();
+
 
 #ifdef SAVE_DECODE_TO_FILE
 	mSaveFile->save(  playbuf->data()  , playbuf->size());
 #endif
+
+	/* 推送另外的数据 Enqueue
+		接口 SLAndroidSimpleBufferQueueItf ID
+		SLresult (*Enqueue) (
+			SLAndroidSimpleBufferQueueItf self,
+			const void *pBuffer,        指向要播放的数据
+			SLuint32 size               要播放数据的大小
+		);
+
+		SL_RESULT_BUFFER_INSUFFICIENT 内存不足
+			the most likely other result is SL_RESULT_BUFFER_INSUFFICIENT,
+			which for this code example would indicate a programming error
+
+		1. 不会在 SetPlayState(mIPlayerPlay, SL_PLAYSTATE_PLAYING);就回调的! 必须先enqueue一次才会启动回调
+	 	2. 在不设置SL_PLAYSTATE_PLAYING的情况下(处于非playing状态) enqueue足够多的数据 也不会播放!
+	 */
+	//CostHelper ch ;
 	result = (*mIPlayerBufferQueue)->Enqueue(mIPlayerBufferQueue, playbuf->data() , playbuf->size() );
 	if (SL_RESULT_SUCCESS != result) {
 		ALOGE("Enqueue ERROR !");
+	}else{
+		/*
+		 * Note:
+		 * 根据 OpenSL_ES_Specification_1.0.1.pdf 8.12 SLBufferQueueItf
+		 * 在下一次回调之前不能修改buffer的数据 ！
+		 *
+		 * The buffers that are queued are used in place and are not required to be copied by the
+		 * device, although this maybe implementation-dependent. The application developer
+		 * should be aware that modifying the content of a buffer after it has been queued is
+		 * undefined and can cause audio corruption.
+		 *
+		 * Once an enqueued buffer has finished playing, as notified by the callback notification, it
+		 * is safe to delete the buffer or fill the buffer with new data and once again enqueue the
+		 * buffer for playback.
+		 */
+		mLastQueuedBuffer = playbuf ;
 	}
+	//ALOGD("cost time %lld " , ch.Get());
+	// 一次回调  只能调用一次 Enqueue
+
 }
 
+/* 析构顺序
+	1.先调用 类 析构函数
+ 	2.析构类中 实例成员
+ 	3.基类 析构函数
+ */
 AudioTrack::~AudioTrack()
 {
-	ALOGD("delete Audio Track entry %p", this );
+	ALOGD("~AudioTrack delete Audio Track entry %p", this );
 	{
 		AutoMutex l(mBufMux);
 		mStop = true ;
 		mBufCon->signal();
+		mBufFullCon->signal();
 	}
 
 	SLresult result = (*mIPlayerPlay)->SetPlayState(mIPlayerPlay, SL_PLAYSTATE_STOPPED);
@@ -256,7 +302,7 @@ AudioTrack::~AudioTrack()
 	delete mBufMux; mBufMux = NULL;
 	delete mBufCon; mBufCon = NULL;
 	delete mBufFullCon; mBufFullCon = NULL;
-	ALOGD("delete Audio Track done %p", this );
+	ALOGD("~AudioTrack delete Audio Track done %p", this );
 
 }
 
@@ -285,7 +331,9 @@ bool AudioTrack::write(sp<Buffer> buf)
 			ALOGE("Enqueue ERROR !");
 		}
 		mStarted = true ;
-		mCurrentPts = buf->pts();
+		//mCurrentPts = buf->pts();
+		mLastQueuedBuffer = buf ;
+		ALOGD("first write , enqueue ");
 		return true ;
 	}
 

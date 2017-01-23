@@ -13,7 +13,7 @@
 #include "project_utils.h"
 #include <errno.h>
 
-
+//#define SAVE_DECODE_TO_FILE
 #define MAX_PACKET_QUEUE_SIZE 43
 
 AACSWDecoder::AACSWDecoder(AVCodecParameters* para, double timebase):mStop(false),mTimeBase(timebase),mSwrCtx(NULL)
@@ -68,7 +68,7 @@ AACSWDecoder::AACSWDecoder(AVCodecParameters* para, double timebase):mStop(false
 	mBM = new BufferManager(mDecodedFrameSize ,  30 );
 
 #ifdef SAVE_DECODE_TO_FILE
-	mSaveFile = new SaveFile("/mnt/sdcard/temp.pcm");
+	mSaveFile = new SaveFile("/mnt/sdcard/decode.pcm");
 #endif
 }
 

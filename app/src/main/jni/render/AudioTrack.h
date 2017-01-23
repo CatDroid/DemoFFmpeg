@@ -52,7 +52,12 @@ public:
 private:
 	double mCurrentPts ;
 
+	sp<Buffer> mLastQueuedBuffer ;
+
+	// Only for debug +++
 	sp<SaveFile> mSaveFile;
+
+	// Only for debug ---
 
 };
 
