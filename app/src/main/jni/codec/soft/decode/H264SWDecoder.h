@@ -11,7 +11,7 @@
 #include <pthread.h>
 #include <list>
 #include "IDeMuxerSink.h"
-#include "BufferManager.h"
+#include "MyPacket.h"
 
 extern "C"{
 #include "libavformat/avformat.h"
@@ -26,24 +26,24 @@ extern "C"{
 class H264SWDecoder : public DeMuxerSinkBase {
 
 public:
-	H264SWDecoder(AVCodecParameters* para);
+	H264SWDecoder(AVCodecParameters* para , double timebase );
 	virtual ~H264SWDecoder();
 
 	void start(RenderThread* rt );
 	void stop();
 
-	bool put(sp<Buffer> packet);
+	bool put(sp<MyPacket> packet);
 	void clearupPacketQueue();
 
 private:
 	AVCodecContext *mVideoCtx;
+
+	sp<BufferManager> mBM;
 	RenderThread* mpRender ;
 	int32_t mDecodedFrameSize ;
 	double mTimeBase ;
 
-	sp<BufferManager> mBM;
-
-	std::list<sp<Buffer>> mPacketQueue;
+	std::list<sp<MyPacket>> mPacketQueue;
 	Mutex* mQueueMutex ;
 	Condition* 	mSinkCond ;
 	Condition* 	mSourceCond ;

@@ -10,7 +10,7 @@
 
 BufferManager::BufferManager(uint32_t perBufSize , uint32_t maxBufs)
         :mPerBufSize(perBufSize),mMaxBufs(maxBufs) {
-
+    mBufMutex = new Mutex();
     ALOGD("%p constructor " , this );
 }
 
@@ -46,7 +46,9 @@ void BufferManager::push(Buffer *pbuf)
     }else{
         ALOGD("%p put to freeBuffer %p" ,this , pbuf);
         mFreeBuffers.push_back(pbuf);
+        pbuf->mBM = NULL;
     }
+    ALOGD("after push ref_count %d " , this->ref_count() );
 }
 
 BufferManager::~BufferManager()
@@ -59,4 +61,5 @@ BufferManager::~BufferManager()
         ALOGD("%p free one buffer %p" , this ,pbuf );
         delete pbuf;
     }
+    delete mBufMutex ; mBufMutex = NULL ;
 }

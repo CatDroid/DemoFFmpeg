@@ -10,9 +10,16 @@
 
 #include "AudioTrack.h"
 
+#define SAVE_DECODE_TO_FILE
+
+#define AUDIO_RENDER_BUFFER_SIZE 10
 AudioTrack::AudioTrack():mStop(false),mStarted(false)
 {
 	SLresult result;
+
+	mBufFullCon = new Condition();
+	mBufCon = new Condition();
+	mBufMux = new Mutex();
 
 	// create engine
 	ALOGD( "创建引擎Engine Object");
@@ -126,8 +133,6 @@ AudioTrack::AudioTrack():mStop(false),mStarted(false)
 	assert(SL_RESULT_SUCCESS == result);
 
 
-	mBufCon = new Condition();
-	mBufMux = new Mutex();
 	// register callback on the buffer queue 注册函数 让系统回调填充buffer
 	result = (*mIPlayerBufferQueue)->RegisterCallback(mIPlayerBufferQueue, playerCallback, this);
 	assert(SL_RESULT_SUCCESS == result);
@@ -137,6 +142,9 @@ AudioTrack::AudioTrack():mStop(false),mStarted(false)
 	result = (*mIPlayerPlay)->SetPlayState(mIPlayerPlay, SL_PLAYSTATE_PLAYING);
 	assert(SL_RESULT_SUCCESS == result);
 
+#ifdef SAVE_DECODE_TO_FILE
+	mSaveFile = new SaveFile("/mnt/sdcard/render.pcm");
+#endif
 }
 
 
@@ -156,7 +164,7 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 			the most likely other result is SL_RESULT_BUFFER_INSUFFICIENT,
 			which for this code example would indicate a programming error
 	 */
-	ALOGD("playerCallback");// 不会在 SetPlayState(mIPlayerPlay, SL_PLAYSTATE_PLAYING);就回调的!
+	//ALOGD("playerCallback");// 不会在 SetPlayState(mIPlayerPlay, SL_PLAYSTATE_PLAYING);就回调的!
 	AudioTrack*  at = (AudioTrack*)context ;
 	at->playerCallback(bq);
 
@@ -172,8 +180,10 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 			mBufCon->wait(mBufMux);
 			continue ;
 		}else{
+			int size = mBuf.size();
 			playbuf = mBuf.front();
 			mBuf.pop_front();
+			if(size >= AUDIO_RENDER_BUFFER_SIZE ) mBufFullCon->signal();
 			break;
 		}
 	}
@@ -187,8 +197,13 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 		return ;
 	}
 
-	ALOGD("play Enqueue");
+	ALOGD("play Enqueue %d " , playbuf->size() );
 	SLresult result;
+	mCurrentPts = playbuf->pts();
+
+#ifdef SAVE_DECODE_TO_FILE
+	mSaveFile->save(  playbuf->data()  , playbuf->size());
+#endif
 	result = (*mIPlayerBufferQueue)->Enqueue(mIPlayerBufferQueue, playbuf->data() , playbuf->size() );
 	if (SL_RESULT_SUCCESS != result) {
 		ALOGE("Enqueue ERROR !");
@@ -240,6 +255,7 @@ AudioTrack::~AudioTrack()
 
 	delete mBufMux; mBufMux = NULL;
 	delete mBufCon; mBufCon = NULL;
+	delete mBufFullCon; mBufFullCon = NULL;
 	ALOGD("delete Audio Track done %p", this );
 
 }
@@ -269,14 +285,30 @@ bool AudioTrack::write(sp<Buffer> buf)
 			ALOGE("Enqueue ERROR !");
 		}
 		mStarted = true ;
+		mCurrentPts = buf->pts();
 		return true ;
 	}
 
-	AutoMutex l(mBufMux);
-	if( mStop ) return false ;
-	bool empty = mBuf.empty();
-	mBuf.push_back(buf);
-	if(empty) {mBufCon->signal();ALOGD("signal ");};
+	while(!mStop){
+		AutoMutex l(mBufMux);
+		if( mStop ) return false ;
+		bool empty = mBuf.empty();
+		if(empty){
+			mBuf.push_back(buf);
+			mBufCon->signal(); ALOGD("signal ");
+			break;
+		}else{
+			if( mBuf.size() >= AUDIO_RENDER_BUFFER_SIZE ){
+				ALOGW("too much audio RenderBuffer wait!");
+				mBufFullCon->wait(mBufMux);
+				continue;
+			}else{
+				mBuf.push_back(buf);
+				break;
+			}
+		}
+	}
+
     return true  ;
 }
 

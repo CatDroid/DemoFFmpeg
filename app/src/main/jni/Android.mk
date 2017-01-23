@@ -1,7 +1,7 @@
+
+###################################################################################
 LOCAL_PATH := $(call my-dir)
-
 FFMPEG_LIB_ROOT_PATH := /home/hanlon/Cat6/git_qq_yun/ffmpeg/android/
-
 
 include $(CLEAR_VARS)
 LOCAL_MODULE    := avcodec
@@ -33,7 +33,7 @@ LOCAL_SRC_FILES := $(FFMPEG_LIB_ROOT_PATH)/$(TARGET_ARCH_ABI)/lib/libavutil.so
 LOCAL_EXPORT_C_INCLUDES := $(FFMPEG_LIB_ROOT_PATH)/$(TARGET_ARCH_ABI)/include/
 include $(PREBUILT_SHARED_LIBRARY)
 
-
+###################################################################################
 include $(CLEAR_VARS)
 
 # GCC编译器选项及优化提示
@@ -49,7 +49,8 @@ LOCAL_SRC_FILES += common/ffmpeg_common.cpp \
 					 common/project_utils.cpp \
 					 common/BufferManager.cpp \
 					 common/Buffer.cpp \
-					 common/SaveFile.cpp
+					 common/SaveFile.cpp \
+					 common/MyPacket.cpp
 LOCAL_SRC_FILES += jni_onload.cpp 
 LOCAL_SRC_FILES += com_tom_ffmpegAPI_MP4player.cpp
 LOCAL_SRC_FILES += demux/local/LocalFileDemuxer.cpp
@@ -71,3 +72,4 @@ LOCAL_C_INCLUDES += \
 		$(LOCAL_PATH)/render/
 		
 include $(BUILD_SHARED_LIBRARY)
+###################################################################################

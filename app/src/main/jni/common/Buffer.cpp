@@ -45,5 +45,4 @@ void Buffer::reset(sp<BufferManager>bm)
 
 void Buffer::recycle(){
     mBM->push(this);
-    mBM = NULL;
 }

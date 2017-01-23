@@ -18,8 +18,8 @@ extern "C"{
 }
 
 #define MAX_PACKET_QUEUE_SIZE 20
-H264SWDecoder::H264SWDecoder(AVCodecParameters* para)
-				:mVideoCtx(NULL),mpRender(NULL),mDecodeTh(-1),mStop(false)
+H264SWDecoder::H264SWDecoder(AVCodecParameters* para , double timebase)
+				:mVideoCtx(NULL),mpRender(NULL),mDecodeTh(-1),mStop(false),mTimeBase(timebase)
 {
 	int ret = 0 ;
 	const AVCodec *vcodec = NULL;
@@ -56,8 +56,7 @@ H264SWDecoder::H264SWDecoder(AVCodecParameters* para)
 	 * time_base.den是分母
 	 * av_q2d 就是 把 num/den
 	 */
-	mTimeBase = av_q2d(mVideoCtx->time_base) ; // deprecated mVideoCtx->time_base 这个是0
-
+	//mTimeBase = av_q2d(mVideoCtx->time_base) ; // deprecated mVideoCtx->time_base 这个是0
 
 
 	ALOGD("FrameSize %d TimeBase %f[%d/%d]  ", mDecodedFrameSize,  mTimeBase , mVideoCtx->time_base.num , mVideoCtx->time_base.den );
@@ -148,6 +147,7 @@ void H264SWDecoder::stop()
 			mSinkCond->signal();
 		}
 		pthread_join(mDecodeTh, NULL);
+		clearupPacketQueue();
 		ALOGD("H264SWDecoder stop done");
 	}else{
 		ALOGD("Decode Thread not start yet ");
@@ -156,13 +156,16 @@ void H264SWDecoder::stop()
 }
 
 
-bool H264SWDecoder::put(sp<Buffer> packet ){
+bool H264SWDecoder::put(sp<MyPacket> packet ){
 
 	while(!mStop){
 		AutoMutex l(mQueueMutex);
 		if( mPacketQueue.size() == MAX_PACKET_QUEUE_SIZE ){
+			ALOGW("too much video AVPacket wait!");
 			mSourceCond->wait(mQueueMutex);
 			continue ;
+			// 当前已经有很多没有解码的AVPacket 这里阻塞Muxer 等待解码完成
+			// 可以不阻塞 立刻返回  采用丢帧方法
 		}
 		mPacketQueue.push_back(packet);
 		mSinkCond->signal();
@@ -174,19 +177,19 @@ bool H264SWDecoder::put(sp<Buffer> packet ){
 
 void H264SWDecoder::loop( ){
 
-	AVPacket* packet ;
+
 	AVFrame *frame = av_frame_alloc();
 	int got_frame = 0 ;
 
 
 	int ret = 0 ;
 	while( ! mStop ){
-		packet = NULL ;
+		sp<MyPacket> mypkt = NULL ;
 		{
 			AutoMutex l(mQueueMutex);
 			if( mPacketQueue.empty() == false )
 			{
-				packet = mPacketQueue.front();
+				mypkt = mPacketQueue.front();
 				mPacketQueue.pop_front();
 				mSourceCond->signal();
 			}else{
@@ -199,29 +202,40 @@ void H264SWDecoder::loop( ){
 
 
 		CostHelper* n = new CostHelper();
+
+		AVPacket* packet = mypkt->packet();
+		ALOGD(">[dts %ld pts %ld] %02x %02x %02x %02x %02x" ,
+			  mypkt->packet()->dts,
+			  mypkt->packet()->pts,
+			  mypkt->packet()->data[0],
+			  mypkt->packet()->data[1],
+			  mypkt->packet()->data[2],
+			  mypkt->packet()->data[3],
+			  mypkt->packet()->data[4]
+		);
+
 		// avcodec_send_packet() and avcodec_receive_frame() 异步方式
 		ret = avcodec_decode_video2(mVideoCtx, frame, &got_frame, packet );
 
-		ALOGD("packet %02x %02x %02x %02x %02x dts %ld pts %ld" , packet->data[0] ,
-			  packet->data[1],
-			  packet->data[2],
-			  packet->data[3],
-			  packet->data[4],
-			  packet->dts,
-			  packet->pts
-		);
 		if( ret < 0 ){
 			ALOGE("avcodec_decode_video2 fail ");
 			ffmpeg_strerror(ret , "avcodec_decode_video2:");
 			break;
 		}
 		if( got_frame > 0 ){
+			if (frame->pts == AV_NOPTS_VALUE) {
+				frame->pts = av_frame_get_best_effort_timestamp(frame);
+			}
+
 			// YUV colorspace type.
 			AVColorSpace cs = av_frame_get_colorspace(frame) ; // AVCOL_SPC_UNSPECIFIED
 			AVPixelFormat pixfmt = mVideoCtx->pix_fmt ; // AV_PIX_FMT_YUV420P
-			ALOGD("get Frame color space %d  AVPixelFormat %d [%p %p %p %p] [%d %d %d %d] pts %lld " , cs  , pixfmt ,
-					frame->data[0], frame->data[1] , frame->data[2] , frame->data[3],
-					frame->linesize[0],frame->linesize[1],frame->linesize[2],frame->linesize[3] , packet->pts );
+			ALOGD("<[pts %lld pkt_dts %lld pkt_pts %lld] Frame color space %d  Codec PixelFormat %d [%p %p %p %p] [%d %d %d %d]" ,
+				  frame->pts,frame->pkt_dts , frame->pkt_pts,
+				  cs  , pixfmt ,
+				  frame->data[0], frame->data[1] , frame->data[2] , frame->data[3],
+				  frame->linesize[0],frame->linesize[1],frame->linesize[2],frame->linesize[3]
+				);
 
 			ALOGD("decode diff 1  %lld us " , n->Get() );
 
@@ -257,8 +271,7 @@ void H264SWDecoder::loop( ){
 //				ALOGD("write testfile ok");
 //			}
 			ALOGD("decode diff 2  %lld us " , n->Get() );
-			//ALOGD(">>>>> %lld %f %lld " ,  packet->pts ,  packet->pts * mTimeBase * 1000  , (uint64_t)(packet->pts * mTimeBase * 1000) );
-			buf->pts() = packet->pts   ;
+			buf->pts() = frame->pts * mTimeBase * 1000  ;  // ms
 			buf->height() = mVideoCtx->height ;
 			buf->width() = mVideoCtx->width ;
 			buf->size() = mDecodedFrameSize ;
@@ -268,22 +281,20 @@ void H264SWDecoder::loop( ){
 		}else{
 			ALOGD("Got Nothing");
 		}
-
-		av_packet_unref(packet); // get from Extractor ! release HERE !
-
+		packet = NULL;
 	}
 
-	clearupPacketQueue();
+	av_frame_free(&frame);
 
 }
 
 void H264SWDecoder::clearupPacketQueue()
 {
 	AutoMutex l(mQueueMutex);
-	std::list<AVPacket*>::iterator it = mPacketQueue.begin();
+	std::list<sp<MyPacket>>::iterator it = mPacketQueue.begin();
 	while(it != mPacketQueue.end())
 	{
-		av_packet_unref(*it);
+		*it = NULL;
 		mPacketQueue.erase(it++);
 		ALOGI("clean up AVPacket !");
 	}

@@ -15,7 +15,7 @@
 #include <string>
 #include <list>
 #include "IDeMuxerSink.h"
-#include "BufferManager.h"
+#include "MyPacket.h"
 extern "C"{
 /*
  * 	编译链接时找不到对应的函数
@@ -35,6 +35,8 @@ private:
 	AVFormatContext * mAvFmtCtx;
 	int mVstream ;
 	int mAstream ;
+	double mVTimebase ;
+	double mATimebase ;
 
 	pthread_t mReadThread ;
 	std::string     mSPS; // with 00 00 00 01
@@ -52,6 +54,8 @@ public :
 	virtual ~LocalFileDemuxer();
 	virtual AVCodecParameters* getVideoCodecPara();
 	virtual AVCodecParameters* getAudioCodecPara();
+	double getAudioTimebase(){return mATimebase;};
+	double getVideoTimebase(){return mVTimebase;}
 	void play();
 	void stop();
 
@@ -60,7 +64,7 @@ public :
 	void setAudioSinker(DeMuxerSinkBase* audioSinker);
 	void setVideoSinker(DeMuxerSinkBase* videoSinker);
 
-	sp<BufferManager> mBM ;
+	sp<PacketManager> mPm ;
 
 };
 

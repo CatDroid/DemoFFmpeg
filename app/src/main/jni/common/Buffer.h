@@ -27,7 +27,7 @@ public:
     bool alloc(int32_t size);
     void reset(sp<BufferManager>bm);
     uint8_t* data(){return mPtr;}
-    int64_t& pts() {return mPts;}
+    int64_t& pts() {return mPts;} //ms
     int32_t& size() {return mSize;}
     int32_t& width() {return mWidth;}
     int32_t& height() {return mHeight;}
@@ -40,6 +40,7 @@ public:
     COMPARE(==)
 
 private:
+    friend class BufferManager ;
     int64_t mPts ;
     int32_t mWidth;
     int32_t mHeight;

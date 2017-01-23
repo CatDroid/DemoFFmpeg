@@ -41,7 +41,7 @@ static void JNICALL native_playmp4 (JNIEnv* env , jobject mp4player , jlong ctx,
 	if( para != NULL){
 		switch(para->codec_id){
 		case AV_CODEC_ID_H264:
-			player->mpVDecoder  = new H264SWDecoder(para);
+			player->mpVDecoder  = new H264SWDecoder(para ,  player->mpDeMuxer->getVideoTimebase() );
 			break;
 		default:
 			ALOGE("don NOT support %d " , para->codec_id );
@@ -54,7 +54,7 @@ static void JNICALL native_playmp4 (JNIEnv* env , jobject mp4player , jlong ctx,
 	if( para != NULL){
 		switch(para->codec_id){
 		case AV_CODEC_ID_AAC:
-			player->mpADecoder = new AACSWDecoder(para);
+			player->mpADecoder = new AACSWDecoder(para ,  player->mpDeMuxer->getAudioTimebase()  );
 			break;
 		default:
 			ALOGE("don NOT support %d " , para->codec_id );
@@ -69,8 +69,8 @@ static void JNICALL native_playmp4 (JNIEnv* env , jobject mp4player , jlong ctx,
 	player->mpRender = new RenderThread(player->mpView, player->mpTrack);
 
 
-	player->mpDeMuxer->addAudioSinker(player->mpADecoder);
-	player->mpDeMuxer->addVideoSinker(player->mpVDecoder);
+	player->mpDeMuxer->setAudioSinker(player->mpADecoder);
+	player->mpDeMuxer->setVideoSinker(player->mpVDecoder);
 	player->mpVDecoder->start(player->mpRender);
 	player->mpADecoder->start(player->mpRender);
 	player->mpDeMuxer->play();

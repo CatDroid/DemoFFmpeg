@@ -16,7 +16,7 @@
 
 #define MAX_PACKET_QUEUE_SIZE 43
 
-AACSWDecoder::AACSWDecoder(AVCodecParameters* para):mStop(false)
+AACSWDecoder::AACSWDecoder(AVCodecParameters* para, double timebase):mStop(false),mTimeBase(timebase),mSwrCtx(NULL)
 {
 	int ret = 0 ;
 	mAudioCtx = avcodec_alloc_context3(NULL);
@@ -66,52 +66,73 @@ AACSWDecoder::AACSWDecoder(AVCodecParameters* para):mStop(false)
 	ALOGD("calculated linesize %d, buffer size %d " , out_linesize,mDecodedFrameSize);
 	assert(out_buffer_size>0);
 	mBM = new BufferManager(mDecodedFrameSize ,  30 );
+
+#ifdef SAVE_DECODE_TO_FILE
+	mSaveFile = new SaveFile("/mnt/sdcard/temp.pcm");
+#endif
 }
 
 
 void AACSWDecoder::loop( ){
 
-	AVPacket* packet ;
+
 	AVFrame *frame = av_frame_alloc();
 	int got_frame = 0 ;
 
 
 	int ret = 0 ;
 	while(! mStop ){
-		packet = NULL ;
 
-        {
-            Mutex::Autolock l(mQueueMutex);
-            if( mPacketQueue.empty() == false )
-            {
-                packet = mPacketQueue.front();
-                mPacketQueue.pop_front();
 
-                /*如果生产者buffer已经满了*/mSourceCond->signal();
-            }else{
-                mSinkCond->wait(mQueueMutex);// 消费者buffer空
-                continue;
-            }
-        }
+		sp<MyPacket> mypkt = NULL ;
+		{
+			AutoMutex l(mQueueMutex);
+			if( mPacketQueue.empty() == false )
+			{
+				mypkt = mPacketQueue.front();
+				mPacketQueue.pop_front();
+				mSourceCond->signal();
+			}else{
+				if(mStop)break;
+				mSinkCond->wait(mQueueMutex);
+				continue;
+			}
+
+		}
 
 		{
+			ALOGD(">[dts %ld pts %ld] %02x %02x %02x %02x %02x" ,
+				  mypkt->packet()->dts,
+				  mypkt->packet()->pts,
+				  mypkt->packet()->data[0],
+				  mypkt->packet()->data[1],
+				  mypkt->packet()->data[2],
+				  mypkt->packet()->data[3],
+				  mypkt->packet()->data[4]
+				);
 			// @deprecated Use avcodec_send_packet() and avcodec_receive_frame().
 //#pragma GCC diagnostic push
 //#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-			ret  = avcodec_decode_audio4(mAudioCtx, frame, &got_frame, packet);
+			ret  = avcodec_decode_audio4(mAudioCtx, frame, &got_frame, mypkt->packet());
 //#pragma GCC diagnostic pop
 			if( ret < 0 ){
 				ALOGE("avcodec_decode_video2 fail ");
 				ffmpeg_strerror(ret , "avcodec_decode_video2:");
 				break;
 			}
-			if( got_frame > 0 ){
+			if( got_frame > 0 ) {
 				// frame_number 到目前为止 解码器已返回的总帧数
-				ALOGD("total number of frames: %d cur: %d " ,
+				if (frame->pts == AV_NOPTS_VALUE) {
+					frame->pts = av_frame_get_best_effort_timestamp(frame);
+				}
+
+				ALOGD("<[pts %lld pkt_dts %lld pkt_pts %lld] "
+							  "total number of frames: %d linesize[0]: %d " ,
+					  frame->pts,frame->pkt_dts , frame->pkt_pts,
 					  mAudioCtx->frame_number , frame->linesize[0] ); // 8192 = 1024(每个通道一个帧含有多少个sample)*2 * 4(Float)
+
+
 				sp<Buffer> buf = mBM->pop();
-
-
 				if(mSwrCtx == NULL ){
 					/*
 					 * 在使用ffmpeg解码aac的时候，如果使用avcodec_decode_audio4函数解码
@@ -120,34 +141,43 @@ void AACSWDecoder::loop( ){
 					 */
 					mSwrCtx = swr_alloc();
 					mSwrCtx = swr_alloc_set_opts(mSwrCtx,
-												 mAudioCtx->channel_layout,
-											     AV_SAMPLE_FMT_S16,
-												 mAudioCtx->sample_rate ,
-												 mAudioCtx->channel_layout,
+												 mAudioCtx->channel_layout,// 应该跟AudioTrack一样
+											     AV_SAMPLE_FMT_S16,        // 应该跟AudioTrack一样
+												 mAudioCtx->sample_rate ,  // 应该跟AudioTrack一样
+
+												 mAudioCtx->channel_layout,// 跟解码器一样
 												 mAudioCtx->sample_fmt,
 												 mAudioCtx->sample_rate ,
 											     0,
 												 NULL);
 					swr_init(mSwrCtx);
 				}
-				uint8_t* lineaddr[] = {buf->data()};
+				uint8_t* lineaddr[] = { buf->data() };
+				// swr_convert 返回每个通道的样本数    *2通道*2字节
 				int32_t len = swr_convert(mSwrCtx, lineaddr , mDecodedFrameSize ,(const uint8_t **)frame->data , frame->nb_samples);
+				if( len > 0 ){
+					int resampled_data_size = len * mAudioCtx->channels  * av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);//每声道采样数 x 声道数 x 每个采样字节数
+					ALOGD( "len = %d resampled_data_size = %d  mDecodedFrameSize = %d " ,len, resampled_data_size,  mDecodedFrameSize );
+					buf->size() = mDecodedFrameSize ;
+					buf->pts() = frame->pts * mTimeBase ;
 
-				int resampled_data_size = len * mAudioCtx->channels  * av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);//每声道采样数 x 声道数 x 每个采样字节数
+#ifdef SAVE_DECODE_TO_FILE
+					mSaveFile->save(  buf->data()  , buf->size());
+#endif
+					mpRender->renderAudio( buf ) ;
+				}else{
+					ffmpeg_strerror(len,"swr_convert");
+				}
 
-				ALOGD( "resampled_data_size = %d  mDecodedFrameSize = %d " ,resampled_data_size,  mDecodedFrameSize );
-				buf->size() = mDecodedFrameSize ;
-				buf->pts() = packet->pts ;
-
-				mpRender->renderAudio( buf ) ;
 				av_frame_unref(frame);
+			}else{
+				ALOGE("AAC SWDecoder get Nothing !");
 			}
-
-			av_packet_unref(packet);
 		}
+		mypkt = NULL;
 	}
+	av_frame_free(&frame);
 
-	clearupPacketQueue();
 
 }
 
@@ -181,51 +211,31 @@ void AACSWDecoder::stop()
             mSinkCond->signal();
         }
 		pthread_join(mDecodeTh, NULL);
+		clearupPacketQueue();
         delete mQueueMutex ;    mQueueMutex = NULL ;
         delete mSinkCond;       mSinkCond = NULL;
         delete mSourceCond;     mSourceCond = NULL;
 		ALOGD("AACSWDecoder stop done ");
+
 	}else{
 		ALOGD("AACSWDecoder not start yet ");
 	}
 }
 
-bool AACSWDecoder::isPacketQueueFull()
-{
-	if( mPacketQueue.size() >= MAX_PACKET_QUEUE_SIZE ){
-		return true ;
-	}else{
-		return false ;
-	}
-}
 
-bool AACSWDecoder::put(AVPacket* packet )
-{
-	if( mStop ) return false ;
 
-    Mutex::Autolock l(mQueueMutex);
-	int size = mPacketQueue.size() ;
-	if( size == MAX_PACKET_QUEUE_SIZE ){
-        mSourceCond->wait(mQueueMutex);
-		if( mStop ){ // exit
-			return false ;
-		}
-	}
 
-	AVPacket* one = av_packet_alloc();
-	*one = *packet;
-	mPacketQueue.push_back(one);
-    mSinkCond->signal();
-	return true ;
-}
-
-bool AACSWDecoder::put(sp<Buffer> packet ){
+bool AACSWDecoder::put(sp<MyPacket> packet ){
 
 	while(!mStop){
 		AutoMutex l(mQueueMutex);
+		if(mStop) return false ;
 		if( mPacketQueue.size() == MAX_PACKET_QUEUE_SIZE ){
+			ALOGW("too much audio AVPacket wait!");
 			mSourceCond->wait(mQueueMutex);
 			continue ;
+			// 当前已经有很多没有解码的AVPacket 这里阻塞Muxer 等待解码完成
+			// 可以不阻塞 立刻返回  采用丢帧方法
 		}
 		mPacketQueue.push_back(packet);
 		mSinkCond->signal();
@@ -237,16 +247,13 @@ bool AACSWDecoder::put(sp<Buffer> packet ){
 
 void AACSWDecoder::clearupPacketQueue()
 {
-    Mutex::Autolock l(mQueueMutex);
-
-	std::list<AVPacket*>::iterator it = mPacketQueue.begin();
-	while(it != mPacketQueue.end())
-	{
-		av_packet_unref(*it);
+	AutoMutex l(mQueueMutex);
+	std::list<sp<MyPacket>>::iterator it = mPacketQueue.begin();
+	ALOGI("pending mPacketQueue size %d ", mPacketQueue.size() );
+	while(it != mPacketQueue.end()) {
 		mPacketQueue.erase(it++);
-		ALOGI("clean up !");
 	}
-
+	ALOGI("clean up AVPacket Done!");
 }
 
 

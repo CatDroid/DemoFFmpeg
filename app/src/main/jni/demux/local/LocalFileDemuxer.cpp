@@ -19,7 +19,7 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 				 mLoop(true),mEof(false),mAudioSinker(NULL),mVideoSinker(NULL)
 {
 
-	mBM = new BufferManager( sizeof(AVPacket) , 20 );
+	mPm = new PacketManager( 20 );
 	av_register_all(); 	// 不加 av_register_all avformat_open_input 会导致 Invalid data found when processing input
 						// 不加  android.permission.READ_EXTERNAL_STORAGE 会导致 Permission denied
 
@@ -72,7 +72,8 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 
 		AVRational radional =  av_guess_frame_rate(mAvFmtCtx, mAvFmtCtx->streams[mVstream], NULL);
 		double fps = av_q2d(radional);
-		double video_time_base = av_q2d(pStream->time_base); // 1 / 90,000
+		mVTimebase = av_q2d(pStream->time_base); // 1 / 90,000
+
 
 		ALOGD("file duration %d us  %d ms "  ,mAvFmtCtx->duration , mAvFmtCtx->duration/1000 );
 		ALOGD("video stream (%d,%d), video bitrate=%lld,  fps=%.2f, "
@@ -86,8 +87,8 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 				sample_fmt, (sample_fmt==AV_PIX_FMT_YUV420P?"yuv420":"unknown") ,
 				pStream->time_base.num, pStream->time_base.den,
 				pStream->nb_frames, 	pStream->duration,
-				video_time_base,
-				pStream->duration * video_time_base );
+			    mVTimebase,
+				pStream->duration * mVTimebase );
 
 		uint8_t *src = para->extradata + 5;
 		int extradata_size = para->extradata_size ;
@@ -122,7 +123,7 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 		}
 
 		AVStream* pStream = mAvFmtCtx->streams[mAstream];
-		double audio_time_base = av_q2d(pStream->time_base);
+		mATimebase = av_q2d(pStream->time_base);
 
 		AVSampleFormat sample_fmt = (AVSampleFormat)para->format; // for audio is AVSampleFormat
 
@@ -196,8 +197,8 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 			  para->bits_per_raw_sample ,
 			  pStream->time_base.num, pStream->time_base.den,
 			  pStream->nb_frames, 	pStream->duration,
-			  audio_time_base,
-			  pStream->duration * audio_time_base ,
+			  mATimebase,
+			  pStream->duration * mATimebase ,
 			  pStream->nb_frames * para->frame_size * 1.0f / para->sample_rate  );
 
 		//esds
@@ -208,6 +209,7 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 
 		setupAudioSpec( true , src, extradata_size);
 		DUMP_BUFFER_IN_HEX("esds:",(uint8_t*)mESDS.c_str(),mESDS.size());
+
 
 	}
 
@@ -240,7 +242,7 @@ void LocalFileDemuxer::stop()
 }
 LocalFileDemuxer::~LocalFileDemuxer()
 {
-
+	ALOGD("~LocalFileDemuxer ");
 }
 
 AVCodecParameters* LocalFileDemuxer::getVideoCodecPara()
@@ -300,7 +302,7 @@ void LocalFileDemuxer::setVideoSinker(DeMuxerSinkBase* videoSinker)
 
 void LocalFileDemuxer::loop()
 {
-	AVPacket pkt1, *pkt = &pkt1;
+	sp<MyPacket> pkt = NULL;
     int64_t stream_start_time;
     int pkt_in_play_range = 0;
     int64_t pkt_ts;
@@ -330,11 +332,10 @@ void LocalFileDemuxer::loop()
 	for (;;) {
 		if (!mLoop) break;
 
-		int ret = av_read_frame(mAvFmtCtx, pkt);
+		pkt = mPm->pop();
+		int ret = av_read_frame(mAvFmtCtx, pkt->packet());
 		if (ret < 0) {
 			if ((ret == AVERROR_EOF || avio_feof(mAvFmtCtx->pb)) && ! mEof ) {
-				// 通知 音视频 解码线程结束
-				// TODO
 				mEof = 1;
 			}
 			if (mAvFmtCtx->pb && mAvFmtCtx->pb->error){
@@ -346,42 +347,37 @@ void LocalFileDemuxer::loop()
 			mEof = false;
 		}
 		/* check if packet is in play range specified by user, then queue, otherwise discard */
-		stream_start_time = mAvFmtCtx->streams[pkt->stream_index]->start_time; // 时间单位是 该流的 time base
-		pkt_ts = pkt->pts == AV_NOPTS_VALUE ? pkt->dts : pkt->pts;
-		pkt_in_play_range = duration == AV_NOPTS_VALUE ||
-				(  pkt_ts - (stream_start_time != AV_NOPTS_VALUE ? stream_start_time : 0)   )
-				   * av_q2d(mAvFmtCtx->streams[pkt->stream_index]->time_base)
-				   - (double)(start_time != AV_NOPTS_VALUE ? start_time : 0) / 1000000
-				<= ((double)duration / 1000000);
+		stream_start_time = mAvFmtCtx->streams[pkt->packet()->stream_index]->start_time; // 时间单位是 该流的 time base
 
+		if (pkt->packet()->stream_index == mAstream  ) {
+			ALOGD("audio dts = %ld , pts=%f,dts=%f,duration %f" ,
+				  pkt->packet()->dts ,
+				  pkt->packet()->pts * audio_timebase ,
+				  pkt->packet()->dts * audio_timebase ,
+				  pkt->packet()->duration* audio_timebase  );
+			//pkt->pts = pkt->pts * audio_timebase * 1000  ; // 强制改变时间戳 ms
+			mAudioSinker->put(pkt);
 
-
-		if (pkt->stream_index == mAstream && pkt_in_play_range) {
-			ALOGD("audio pts=%f,dts=%f,duration %f" ,  pkt->pts * audio_timebase , pkt->dts * audio_timebase , pkt->duration* audio_timebase  );
-			//packet_queue_put(&is->audioq, pkt);
-			pkt->pts = pkt->pts * audio_timebase * 1000  ; // 强制改变时间戳 ms
-			mAudioSinker->put();
-
-		} else if (pkt->stream_index == mVstream && pkt_in_play_range
-				   && !( mAvFmtCtx->streams[pkt->stream_index]->disposition & AV_DISPOSITION_ATTACHED_PIC)) {
+		} else if (pkt->packet()->stream_index == mVstream ) {
 			/*
 			 * 第一帧IDR 65帧 dts是负数 pts是0
 			 * video dts = -1502 , pts=0.000000,dts=-0.016689,duration 0.016678
 			 * video dts = 0 , pts=0.016689,dts=0.000000,duration 0.016678
 			 * */
-			ALOGD("video dts = %ld , pts=%f,dts=%f,duration %f" , pkt->dts , pkt->pts * video_timebase , pkt->dts * video_timebase , pkt->duration* video_timebase );
-			//packet_queue_put(&is->videoq, pkt);
-			pkt->dts = pkt->dts * video_timebase * 1000 ;
-			pkt->pts  = pkt->pts * video_timebase * 1000  ; // 强制改变时间戳 ms
-			//ALOGD("video Force to %lld " , pkt->pts  );
-			mVideoSinker->put();
+			ALOGD("video dts = %ld , pts=%f,dts=%f,duration %f" ,
+				  pkt->packet()->dts ,
+				  pkt->packet()->pts * video_timebase ,
+				  pkt->packet()->dts * video_timebase ,
+				  pkt->packet()->duration* video_timebase );
+			//pkt->dts = pkt->dts * video_timebase * 1000 ;
+			//pkt->pts  = pkt->pts * video_timebase * 1000  ; // 强制改变时间戳 ms
+			//mVideoSinker->put(pkt);
 
 		} else {
 			ALOGD("discard avpacket");
-			av_packet_unref(pkt);
 		}
-
-		usleep(10*1000);
+		pkt = NULL;
+		//usleep(10*1000);
 	}
 
 }

@@ -14,6 +14,7 @@
 #include <Buffer.h>
 #include <Condition.h>
 #include <list>
+#include "SaveFile.h"
 
 
 class AudioTrack
@@ -41,10 +42,17 @@ public:
 	bool setMute( bool mute );
 	bool write( sp<Buffer> );
 	Condition* mBufCon;
+	Condition* mBufFullCon;
 	Mutex* mBufMux ;
 	std::list<sp<Buffer>> mBuf;
 	bool mStop;
 	bool mStarted;
+
+	double pts() const {return mCurrentPts;}
+private:
+	double mCurrentPts ;
+
+	sp<SaveFile> mSaveFile;
 
 };
 

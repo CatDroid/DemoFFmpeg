@@ -28,6 +28,9 @@ public:
     }
     inline ~LightRefBase() { }
 
+    // Debug Only
+    inline int ref_count(){ return mCount ;}
+    // Debug Only
 
     typedef LightRefBase<T> basetype;
 private:

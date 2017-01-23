@@ -26,14 +26,14 @@ extern "C"{
 class AACSWDecoder : public DeMuxerSinkBase
 {
 public:
-	AACSWDecoder(AVCodecParameters* para);
+	AACSWDecoder(AVCodecParameters* para , double timebase);
 	virtual ~AACSWDecoder();
 
 
 	void start(RenderThread* rt );
 	void stop();
 
-	bool put(sp<Buffer> packet);
+	bool put(sp<MyPacket> packet);
 	void clearupPacketQueue();
 
 
@@ -43,12 +43,12 @@ private:
 	struct SwrContext * mSwrCtx ;
 	RenderThread* mpRender ;
 	int32_t mDecodedFrameSize ;
-
+	double mTimeBase ;
 
 	bool mStop ;
 	sp<BufferManager> mBM;
 
-	std::list<sp<Buffer>> mPacketQueue;
+	std::list<sp<MyPacket>> mPacketQueue;
 	Mutex* mQueueMutex ;
 	Condition*  mSinkCond ;
 	Condition* mSourceCond ;
@@ -56,6 +56,8 @@ private:
 	void loop();
 	static void* decodeThread(void* arg);
 
+	//
+	sp<SaveFile> mSaveFile ;
 
 };
 

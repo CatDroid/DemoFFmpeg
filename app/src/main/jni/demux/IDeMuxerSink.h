@@ -9,7 +9,7 @@
 #define IDEMUXERSINK_H_
 
 #include <string.h>
-#include <Buffer.h>
+#include "MyPacket.h"
 
 extern "C"{
 #include "libavformat/avformat.h"
@@ -17,17 +17,16 @@ extern "C"{
 }
 
 
-
-class IMuxerSink
+class IDeMuxerSink
 {
 public:
-	virtual bool put ( sp<Buffer> packet) = 0 ; // mayblock
-	virtual ~IMuxerSink() {} ;
+	virtual bool put ( sp<MyPacket> packet) = 0 ; // mayblock
+	virtual ~IDeMuxerSink() {} ;
 };
 
-class DeMuxerSinkBase : public IMuxerSink {
+class DeMuxerSinkBase : public IDeMuxerSink {
 public:
-	virtual bool put( sp<Buffer> ){ /* release buffer auto*/ }
+	virtual bool put( sp<MyPacket> ){ /* release buffer auto*/ }
 	virtual ~DeMuxerSinkBase() { }
 };
 

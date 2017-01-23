@@ -22,7 +22,7 @@ public:
 private:
     uint32_t mPerBufSize ;
     uint32_t mMaxBufs ;
-    Mutex mBufMutex ;
+    Mutex* mBufMutex ;
     std::list<Buffer*> mTotalBuffers;
     std::list<Buffer*> mFreeBuffers;
 };
