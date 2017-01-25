@@ -5,6 +5,7 @@
  *      Author: hanlon
  */
 
+#include <sys/prctl.h>
 #include "H264SWDecoder.h"
 #define LOG_TAG "H264SWDecoder"
 #include "jni_common.h"
@@ -24,6 +25,7 @@ H264SWDecoder::H264SWDecoder(AVCodecParameters* para , double timebase)
 	int ret = 0 ;
 	const AVCodec *vcodec = NULL;
 	const char* codec_name = NULL;
+	AVDictionary* opt = NULL;
 
 	AVCodecID codec_id = AV_CODEC_ID_NONE ;
 
@@ -42,7 +44,11 @@ H264SWDecoder::H264SWDecoder(AVCodecParameters* para , double timebase)
 	codec_id =  vcodec->id;
 	codec_name =  vcodec->name;
 	ALOGD("video stream codec %s %d " , codec_name , codec_id );
-	if((ret = avcodec_open2(mVideoCtx, vcodec, NULL)) < 0){
+
+
+	av_dict_set(&opt, "threads", "auto", 0); // add an entry
+
+	if((ret = avcodec_open2(mVideoCtx, vcodec, &opt )) < 0){
 		ALOGE("call avcodec_open2 return %d", ret);
 		goto FAIL ;
 	}else{
@@ -58,7 +64,21 @@ H264SWDecoder::H264SWDecoder(AVCodecParameters* para , double timebase)
 	 */
 	//mTimeBase = av_q2d(mVideoCtx->time_base) ; // deprecated mVideoCtx->time_base 这个是0
 
+	{
+		std::string meta ;
+		AVDictionaryEntry *m = NULL;
+		while(m=av_dict_get(opt,"",m,AV_DICT_IGNORE_SUFFIX)){
+			meta+= m->key;
+			meta+= "\t:";
+			meta+= m->value;
+			meta+="\n";
+		}
+		ALOGD("h264 decoder meta %p :\n%s", opt , meta.c_str());
+	}
+	av_dict_free(&opt);
 
+	// 默认是0 解码后的frame由AVCodecContext管理
+	ALOGD("AVCodecContext.refcounted_frames = %d " , mVideoCtx->refcounted_frames );
 	ALOGD("FrameSize %d TimeBase %f[%d/%d]  ", mDecodedFrameSize,  mTimeBase , mVideoCtx->time_base.num , mVideoCtx->time_base.den );
 	mQueueMutex = new Mutex();
 	mSinkCond = new Condition();
@@ -214,6 +234,16 @@ void H264SWDecoder::loop( ){
 			  mypkt->packet()->data[4]
 		);
 
+		/*
+		 * 当 AVCodecContext.refcounted_frames 设置为 1, the frame 是引用计数的(reference counted)
+		 * 返回的引用(returned reference)属于调用者 所以调用者不需要的时候 使用av_frame_unref释放
+		 * 调用者 在av_frame_is_writable返回1的情况下 可以安全写入数据
+		 *
+		 * 当 When AVCodecContext.refcounted_frames 设置为0
+		 * 返回的引用属于解码器  只维持有效到 再次调用avcodec_decode_video2 或者 close/flush这个解码器
+		 * 调用者不能写入数据
+		 *
+		 */
 		// avcodec_send_packet() and avcodec_receive_frame() 异步方式
 		ret = avcodec_decode_video2(mVideoCtx, frame, &got_frame, packet );
 
@@ -230,9 +260,11 @@ void H264SWDecoder::loop( ){
 			// YUV colorspace type.
 			AVColorSpace cs = av_frame_get_colorspace(frame) ; // AVCOL_SPC_UNSPECIFIED
 			AVPixelFormat pixfmt = mVideoCtx->pix_fmt ; // AV_PIX_FMT_YUV420P
-			ALOGD("<[pts %lld pkt_dts %lld pkt_pts %lld] Frame color space %d  Codec PixelFormat %d [%p %p %p %p] [%d %d %d %d]" ,
+			ALOGD("<[pts %lld pkt_dts %lld pkt_pts %lld] Frame color space %d  Codec PixelFormat %d  ref %d wri %d  [%p %p %p %p] [%d %d %d %d]" ,
 				  frame->pts,frame->pkt_dts , frame->pkt_pts,
 				  cs  , pixfmt ,
+				  mVideoCtx->refcounted_frames, //
+				  av_frame_is_writable(frame), //
 				  frame->data[0], frame->data[1] , frame->data[2] , frame->data[3],
 				  frame->linesize[0],frame->linesize[1],frame->linesize[2],frame->linesize[3]
 				);
@@ -302,6 +334,7 @@ void H264SWDecoder::clearupPacketQueue()
 
 void* H264SWDecoder::decodeThread(void* arg)
 {
+	prctl(PR_SET_NAME,"H264SWDecoder");
 	H264SWDecoder* decoder = (H264SWDecoder*)arg;
 	decoder->loop();
 

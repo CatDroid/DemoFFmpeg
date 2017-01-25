@@ -13,6 +13,7 @@
 #include "project_utils.h"
 
 #include <netinet/in.h>
+#include <sys/prctl.h>
 
 LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 				:mAvFmtCtx(NULL),mReadThread(-1),mVstream(-1),mAstream(-1),
@@ -54,6 +55,24 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 			ALOGI("not video or audio stream : %d " , type );
 		}
 	}
+
+	/*
+	 * 视频的元数据（metadata）信息可以通过AVDictionary获取。元数据存储在AVDictionaryEntry结构体中
+	 * 每一条元数据分为key和value两个属性
+	 * 在ffmpeg中通过av_dict_get( AVFormatContext.metadata 不是 AVCodecContext )函数获得视频的元数据
+	 *
+	 * m=av_dict_get(pFormatCtx->metadata,"copyright",NULL,0); // NULL就是不能循环
+	 *
+	 */
+	std::string meta ;
+	AVDictionaryEntry *m = NULL;
+	while(m=av_dict_get(mAvFmtCtx->metadata,"",m,AV_DICT_IGNORE_SUFFIX)){
+		meta+= m->key;
+		meta+= "\t:";
+		meta+= m->value;
+		meta+="\n";
+	}
+	ALOGD("AVFormat meta:\n%s", meta.c_str());
 
 	if( mVstream != -1 )
 	{	// 获取视频流信息: 宽 高 比特率 帧率 视频时长 帧数目 时基(timebase) 解码器特定参数(sps pps)
@@ -371,7 +390,7 @@ void LocalFileDemuxer::loop()
 				  pkt->packet()->duration* video_timebase );
 			//pkt->dts = pkt->dts * video_timebase * 1000 ;
 			//pkt->pts  = pkt->pts * video_timebase * 1000  ; // 强制改变时间戳 ms
-			//mVideoSinker->put(pkt);
+			mVideoSinker->put(pkt);
 
 		} else {
 			ALOGD("discard avpacket");
@@ -382,8 +401,11 @@ void LocalFileDemuxer::loop()
 
 }
 
+
 void* LocalFileDemuxer::extractThread( void* arg)
 {
+
+	prctl(PR_SET_NAME,"LocalFileDemuxer");
 	LocalFileDemuxer* player = (LocalFileDemuxer *) arg;
 	//JNI_ATTACH_JVM_WITH_NAME( );
 	ALOGD("Extractor Thread Enter");

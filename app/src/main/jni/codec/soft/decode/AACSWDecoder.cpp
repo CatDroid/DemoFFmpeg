@@ -12,6 +12,7 @@
 #include "ffmpeg_common.h"
 #include "project_utils.h"
 #include <errno.h>
+#include <sys/prctl.h>
 
 //#define SAVE_DECODE_TO_FILE
 #define MAX_PACKET_QUEUE_SIZE 43
@@ -94,6 +95,7 @@ void AACSWDecoder::loop( ){
 				mSourceCond->signal();
 			}else{
 				if(mStop)break;
+				ALOGD("wait for aac avpacket ");
 				mSinkCond->wait(mQueueMutex);
 				continue;
 			}
@@ -183,6 +185,7 @@ void AACSWDecoder::loop( ){
 
 void* AACSWDecoder::decodeThread(void* arg)
 {
+	prctl(PR_SET_NAME,"AACSWDecoder");
 	AACSWDecoder* decoder = (AACSWDecoder*)arg;
 	decoder->loop();
 

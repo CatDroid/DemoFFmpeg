@@ -8,6 +8,7 @@
 #define LOG_TAG "RenderThread"
 
 
+#include <sys/prctl.h>
 #include "jni_common.h"
 
 #include "RenderThread.h"
@@ -176,6 +177,7 @@ void RenderThread::loop()
 
 void* RenderThread::renderloop(void* arg)
 {
+	prctl(PR_SET_NAME,"MyRenderThread");
 	RenderThread* pthread = (RenderThread*)arg;
 	pthread->loop() ;
 	return NULL;
