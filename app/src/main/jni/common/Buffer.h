@@ -31,6 +31,7 @@ public:
     int32_t& size() {return mSize;}
     int32_t& width() {return mWidth;}
     int32_t& height() {return mHeight;}
+    int32_t& fmt() {return mFmt;}
     virtual ~Buffer();
 
     COMPARE(>)
@@ -44,6 +45,7 @@ private:
     int64_t mPts ;
     int32_t mWidth;
     int32_t mHeight;
+    int32_t mFmt ; // AVPixelFormat
     uint8_t* mPtr ;
     int32_t mSize ;
     uint8_t* mTotalPtr ;

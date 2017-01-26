@@ -25,6 +25,7 @@ H264SWDecoder::H264SWDecoder(AVCodecParameters* para , double timebase)
 	int ret = 0 ;
 	const AVCodec *vcodec = NULL;
 	const char* codec_name = NULL;
+	int codec_cap = -1 ;
 	AVDictionary* opt = NULL;
 
 	AVCodecID codec_id = AV_CODEC_ID_NONE ;
@@ -34,16 +35,22 @@ H264SWDecoder::H264SWDecoder(AVCodecParameters* para , double timebase)
 		ALOGE("avcodec_alloc_context3 maybe out of memory");
 		return ;
 	}
+
+
 	ret = avcodec_parameters_to_context(mVideoCtx, para);
 	if (ret < 0){
 		ffmpeg_strerror(ret , "Fill the codec context ERROR");
 		goto FAIL ;
 	}
 
-	vcodec = avcodec_find_decoder(mVideoCtx->codec_id);
+	vcodec = avcodec_find_decoder(mVideoCtx->codec_id); // codec_id = AV_CODEC_ID_H264 (28)
 	codec_id =  vcodec->id;
 	codec_name =  vcodec->name;
-	ALOGD("video stream codec %s %d " , codec_name , codec_id );
+	codec_cap = vcodec->capabilities; // AV_CODEC_CAP_
+	ALOGD("video stream codec %s %d 0x%x" , codec_name , codec_id , codec_cap); // video stream codec h264 28  可以通过ffmpeg -decoders查看这个
+	//if (vcodec->capabilities & AV_CODEC_CAP_TRUNCATED) // 如果解码器支持 非完整的帧: 针对两帧的边界不刚好是包的边界(AVPacket)
+	//	mVideoCtx->flags |= AV_CODEC_FLAG_TRUNCATED; // we do not send complete frames  我们可以处理比特流
+	// 设置这个可能会导致avcodec_decode_video2 got_frame不是1的时候 需要先保存数据
 
 
 	av_dict_set(&opt, "threads", "auto", 0); // add an entry
@@ -62,7 +69,7 @@ H264SWDecoder::H264SWDecoder(AVCodecParameters* para , double timebase)
 	 * time_base.den是分母
 	 * av_q2d 就是 把 num/den
 	 */
-	//mTimeBase = av_q2d(mVideoCtx->time_base) ; // deprecated mVideoCtx->time_base 这个是0
+	//mTimeBase = av_q2d(mVideoCtx->time_base) ; // deprecated mVideoCtx->time_base 这个是0   num=0 den=2 2是避免除0异常 实际是这个参数无效
 
 	{
 		std::string meta ;
@@ -77,9 +84,15 @@ H264SWDecoder::H264SWDecoder(AVCodecParameters* para , double timebase)
 	}
 	av_dict_free(&opt);
 
-	// 默认是0 解码后的frame由AVCodecContext管理
-	ALOGD("AVCodecContext.refcounted_frames = %d " , mVideoCtx->refcounted_frames );
-	ALOGD("FrameSize %d TimeBase %f[%d/%d]  ", mDecodedFrameSize,  mTimeBase , mVideoCtx->time_base.num , mVideoCtx->time_base.den );
+
+	// 默认是0 解码后的frame由AVCodecContext管理    flags/flags2  set by users AV_CODEC_FLAG_  AV_CODEC_FLAG2_ e.g AV_CODEC_FLAG_TRUNCATED
+	ALOGD("AVCodecContext.refcounted_frames = %d flags 0x%x flags2 0x%x" , mVideoCtx->refcounted_frames , mVideoCtx->flags ,mVideoCtx->flags2);
+	// AVCodecContext.time_base 解码已经deprecated 替代使用framerate 编码必须由user设置
+	ALOGD("FrameSize %d framerate %f[%d/%d] TimeBase %f[%d/%d]  ", mDecodedFrameSize,
+		                                        av_q2d(mVideoCtx->framerate), mVideoCtx->framerate.num, mVideoCtx->framerate.den,// { 0, 1} when unknown.
+		                                         mTimeBase  ,mVideoCtx->time_base.num , mVideoCtx->time_base.den );
+	//FrameSize 3110400 framerate 0.000000[0/1] TimeBase 0.000011[0/2]
+
 	mQueueMutex = new Mutex();
 	mSinkCond = new Condition();
 	mSourceCond = new Condition();
@@ -258,16 +271,22 @@ void H264SWDecoder::loop( ){
 			}
 
 			// YUV colorspace type.
-			AVColorSpace cs = av_frame_get_colorspace(frame) ; // AVCOL_SPC_UNSPECIFIED
-			AVPixelFormat pixfmt = mVideoCtx->pix_fmt ; // AV_PIX_FMT_YUV420P
-			ALOGD("<[pts %lld pkt_dts %lld pkt_pts %lld] Frame color space %d  Codec PixelFormat %d  ref %d wri %d  [%p %p %p %p] [%d %d %d %d]" ,
-				  frame->pts,frame->pkt_dts , frame->pkt_pts,
+			AVColorSpace cs = av_frame_get_colorspace(frame) ; // 目前看都是 AVCOL_SPC_UNSPECIFIED 2
+			AVPixelFormat pixfmt = mVideoCtx->pix_fmt ; // 这个参数重要
+			ALOGD("<[pts %lld pkt_dts %lld pkt_pts %lld] Frame color space %d  Codec PixelFormat %d  ref %d wri %d  [%p %p %p %p] [%d %d %d %d]"
+			      "packet.data %p size %d"
+			      ,frame->pts,frame->pkt_dts , frame->pkt_pts,
 				  cs  , pixfmt ,
 				  mVideoCtx->refcounted_frames, //
 				  av_frame_is_writable(frame), //
 				  frame->data[0], frame->data[1] , frame->data[2] , frame->data[3],
 				  frame->linesize[0],frame->linesize[1],frame->linesize[2],frame->linesize[3]
+				  ,packet->data,packet->size
 				);
+			// mVideoCtx->pix_fmt 的可能是  有些mp4文件是yuv444(ubuntu屏幕录制) yuv422（ubuntu摄像头)
+			//  Codec PixelFormat 0 AV_PIX_FMT_YUV420P
+			//	Codec PixelFormat 5 AV_PIX_FMT_YUV444P
+
 
 			ALOGD("decode diff 1  %lld us " , n->Get() );
 
@@ -307,11 +326,26 @@ void H264SWDecoder::loop( ){
 			buf->height() = mVideoCtx->height ;
 			buf->width() = mVideoCtx->width ;
 			buf->size() = mDecodedFrameSize ;
+			buf->fmt() = mVideoCtx->pix_fmt;
 			mpRender->renderVideo(buf) ;
 			av_frame_unref(frame);
 			ALOGD("decode diff 3  %lld us " , n->Get() );
 		}else{
 			ALOGD("Got Nothing");
+			/*
+			 * 是否需要保留 这次解码到的数据??  新的ffplay demo没有这样处理
+			 *
+			 * 是否要判断 avcodec_decode_video2 返回 已经解码这帧用到的数据 (包的边界不一定是帧边界) 然后返回到 avcodec_decode_video2
+			 *
+			 * ffplay的做法是
+			 * 		1.每次判断decode返回 是否已经用完了这个AVPacket 没有的话 调整AVPacket的data和size继续decode
+			 * 		2.已经用完这个AVPacket还没有got_frame 取下一个AVPacket
+			 * 		3.如果AVPacket还没有用完 就got_frame了 调整AVPacket的data和size,先返回保存这个frame 再返回decode前不取数据了
+			 *
+			 * 对与视频
+			 * 	av_read_frame()的例程,它可以从一个简单的包里返回一个视频帧包含的所有数据
+			 * 	所以只需要判断 got_frame 的值 , 如果got_frame==0 只是代表该视频帧 还没有解码完成
+			 */
 		}
 		packet = NULL;
 	}

@@ -27,33 +27,52 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 	ALOGD("open file %s " , file_path );
 	// 	告诉 libavformat 去自动探测文件格式 并且 使用 默认的缓冲区大小
 
+	AVDictionary* dic = NULL;
 	/*
 	 * AVFormatContext **ps 参数需要初始化为 NULL 由avformat_open_input内部分配
 	 * 如果不初始化AVFormatContext* mAvFmtCtx为NULL 会导致 SIGSEGV
 	 */
-	int ret = avformat_open_input(&mAvFmtCtx, file_path, NULL, NULL);
+	int ret = avformat_open_input(&mAvFmtCtx, file_path, NULL, &dic);
 	if( ret < 0 ){
 		ffmpeg_strerror( ret , "open file error ");
 		return ;
 	}
 
+	// dic 可能返回空的
+	AVDictionaryEntry* entry = NULL;
+	std::string file_input_dict ;
+	while( entry=av_dict_get( dic , "" , entry , 0), entry != NULL ){
+		file_input_dict+= entry->key;
+		file_input_dict+= "\t:";
+		file_input_dict+= entry->value;
+		file_input_dict+="\n";
+	}
+	ALOGD("avformat_open_input dict %p num %d dic:\n%s", dic , av_dict_count(dic), file_input_dict.c_str());
+	av_dict_free(&dic); // 不再需要 AVDictionary !
+
+
+	// 填充AVFormatContext的流域
 	if( ret = avformat_find_stream_info(mAvFmtCtx, 0), ret < 0 ){
 		ffmpeg_strerror(  ret  , "find stream info error ");
 	}
-	//ffmpeg_strerror(-13);
+
 
 	for (int i = 0; i <  mAvFmtCtx->nb_streams; i++) {
-		AVStream *st =  mAvFmtCtx->streams[i];
+		AVStream *st =  mAvFmtCtx->streams[i]; // 解复用 得到 视频和音频流
 		enum AVMediaType type = st->codecpar->codec_type;
 		if( type == AVMEDIA_TYPE_AUDIO){
 			mAstream  = i ;
 			ALOGI("Found Audio Stream at %d " , mAstream);
+
 		}else if( type == AVMEDIA_TYPE_VIDEO){
 			mVstream = i ;
 			ALOGI("Found Video Stream at %d " , mVstream);
 		}else {
 			ALOGI("not video or audio stream : %d " , type );
 		}
+		// 打印
+		// AVFormatContext 内部关联到 AVInputFormat iformat 或者AVOutputFormat oformat
+		av_dump_format(mAvFmtCtx,i,file_path,0 /*is_output input(0)*/);
 	}
 
 	/*
@@ -229,7 +248,6 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 		setupAudioSpec( true , src, extradata_size);
 		DUMP_BUFFER_IN_HEX("esds:",(uint8_t*)mESDS.c_str(),mESDS.size());
 
-
 	}
 
 	ALOGD("avformat_open done !");
@@ -352,6 +370,18 @@ void LocalFileDemuxer::loop()
 		if (!mLoop) break;
 
 		pkt = mPm->pop();
+
+		/*
+		 * 在从一个视频文件中的包中用例程 av_read_packet()来读取数据时,一个视频帧的信息通常可以包含在几个包里
+		 * 而另情况更为复杂的是,实际上两帧之间的边界还可以存在于两个包之间。
+		 *
+		 * ffmpeg 0.4.9 引入了新的叫做 av_read_frame()的例程,它可以从一个简单的包里返回一个视频帧包含的所有数据
+		 * 保证了一个AVPacket是对应一个视频帧率
+		 *
+		 * 对于视频  返回一个精准的一帧
+		 * 对于音频  返回一定整数数量的帧(如果帧大小固定的话，e.g PCM or ADPCM data)
+		 * 			或者返回一帧(如果帧大小不固定 e.g MPEG系列audio)
+		 */
 		int ret = av_read_frame(mAvFmtCtx, pkt->packet());
 		if (ret < 0) {
 			if ((ret == AVERROR_EOF || avio_feof(mAvFmtCtx->pb)) && ! mEof ) {

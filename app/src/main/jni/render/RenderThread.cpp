@@ -68,20 +68,20 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 {
 	if( mpSwsCtx == NULL ){
 
-		mpSwsCtx = sws_getContext(buf->width(), buf->height(), AV_PIX_FMT_YUV420P,
+		mpSwsCtx = sws_getContext(buf->width(), buf->height(), (AVPixelFormat)buf->fmt(),/*AV_PIX_FMT_YUV420P*/
 								  buf->width(), buf->height(), AV_PIX_FMT_RGBA,
 									SWS_FAST_BILINEAR,
 									0, 0, 0);
 		mSrcFrame = av_frame_alloc();
 		mDstFrame = av_frame_alloc();
 
-		mRGBSize = av_image_get_buffer_size( AV_PIX_FMT_RGBA , buf->width(), buf->height(), 1 );
+		mRGBSize = av_image_get_buffer_size( AV_PIX_FMT_RGBA , buf->width(), buf->height(), 1 ); // 1是linesize的对齐align
 		mBM = new BufferManager( mRGBSize,  30 );
 	}
 
 	sp<Buffer> rgbbuf = mBM->pop();
 
-	av_image_fill_arrays(mSrcFrame->data, mSrcFrame->linesize, buf->data() , AV_PIX_FMT_YUV420P, buf->width(), buf->height(), 1);
+	av_image_fill_arrays(mSrcFrame->data, mSrcFrame->linesize, buf->data() , (AVPixelFormat)buf->fmt() /*AV_PIX_FMT_YUV420P*/, buf->width(), buf->height(), 1);
 	av_image_fill_arrays(mDstFrame->data, mDstFrame->linesize, rgbbuf->data() , AV_PIX_FMT_RGBA, buf->width(), buf->height(), 1);
 
 

@@ -86,8 +86,9 @@ public class MainActivity extends Activity {
 						mPlayer = new Mp4player();
 
 						//mPlayer.playmp4("/mnt/sdcard/wushun.3gp", mSh.getSurface(), null);
-						mPlayer.playmp4("/mnt/sdcard/1080p60fps.mp4", mSh.getSurface(), null);
-						
+						//mPlayer.playmp4("/mnt/sdcard/1080p60fps.mp4", mSh.getSurface(), null);
+						mPlayer.playmp4("/mnt/sdcard/screen_mic_main_r30_g30_ultrafast_c2_44k_6000K_128K_yuv444.mp4", mSh.getSurface(), null);
+
 					} else {
 						toastMessage("please stop befor play again");
 					}
