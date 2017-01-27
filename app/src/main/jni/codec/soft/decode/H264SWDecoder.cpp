@@ -214,11 +214,18 @@ void H264SWDecoder::loop( ){
 	AVFrame *frame = av_frame_alloc();
 	int got_frame = 0 ;
 
+	bool end = false ;
+	AVPacket endpack = {
+			.data = NULL ,
+			.size = 0,
+			.dts = AV_NOPTS_VALUE,
+			.pts = AV_NOPTS_VALUE
+	};
 
 	int ret = 0 ;
 	while( ! mStop ){
 		sp<MyPacket> mypkt = NULL ;
-		{
+		if( ! end  ){
 			AutoMutex l(mQueueMutex);
 			if( mPacketQueue.empty() == false )
 			{
@@ -233,18 +240,36 @@ void H264SWDecoder::loop( ){
 
 		}
 
-
+		AVPacket* packet = NULL;
 		CostHelper* n = new CostHelper();
+		if( mypkt.get() == NULL){
+			if(!end){
+				ALOGW("End Of file ");
+				/*
+				 * 把所有的解码获取出来 因为还有其他的帧还在内部
+				 * 可以检测ffmpeg解码器的capabilities 如果具备CODEC_CAP_DELAY 那么应该(或者是必须)在解码完所有帧后
+				 * 继续循环调用解码接口,同时把输入包AVPacket的数据指针置为NULL,大小置为0.直到返回got_pictrue为0为止
+				 *
+				 * */
 
-		AVPacket* packet = mypkt->packet();
+				end = true ;
+			}
+			ALOGW("get remaing frame from video decoder ");
+			packet = &endpack;
+		}else{
+			packet = mypkt->packet();
+		}
+
+
+
 		ALOGD(">[dts %ld pts %ld] %02x %02x %02x %02x %02x" ,
-			  mypkt->packet()->dts,
-			  mypkt->packet()->pts,
-			  mypkt->packet()->data[0],
-			  mypkt->packet()->data[1],
-			  mypkt->packet()->data[2],
-			  mypkt->packet()->data[3],
-			  mypkt->packet()->data[4]
+			  packet->dts,
+			  packet->pts,
+			  packet->data?packet->data[0]:0xFF,
+			  packet->data?packet->data[1]:0xFF,
+			  packet->data?packet->data[2]:0xFF,
+			  packet->data?packet->data[3]:0xFF,
+			  packet->data?packet->data[4]:0xFF
 		);
 
 		/*
@@ -332,6 +357,11 @@ void H264SWDecoder::loop( ){
 			ALOGD("decode diff 3  %lld us " , n->Get() );
 		}else{
 			ALOGD("Got Nothing");
+			if(end) {
+				ALOGW("Video Decode last frame done !");
+				mpRender->renderVideo(NULL) ;
+				break;
+			}
 			/*
 			 * 是否需要保留 这次解码到的数据??  新的ffplay demo没有这样处理
 			 *
@@ -350,6 +380,8 @@ void H264SWDecoder::loop( ){
 		packet = NULL;
 	}
 
+
+
 	av_frame_free(&frame);
 
 }
@@ -357,13 +389,14 @@ void H264SWDecoder::loop( ){
 void H264SWDecoder::clearupPacketQueue()
 {
 	AutoMutex l(mQueueMutex);
+	ALOGI("pending mPacketQueue size %d ", mPacketQueue.size() );
 	std::list<sp<MyPacket>>::iterator it = mPacketQueue.begin();
 	while(it != mPacketQueue.end())
 	{
 		*it = NULL;
 		mPacketQueue.erase(it++);
-		ALOGI("clean up AVPacket !");
 	}
+	ALOGI("clean up AVPacket Done!");
 }
 
 void* H264SWDecoder::decodeThread(void* arg)

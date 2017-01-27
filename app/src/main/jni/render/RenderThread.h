@@ -45,13 +45,14 @@ private:
 	AVFrame* mSrcFrame ;
 	AVFrame* mDstFrame ;
 	int32_t mRGBSize ;
-	bool mStop ;
+	volatile  bool mStop ;
 	int64_t mStartSys ;
 	int64_t mStartPts ;
 	std::list<sp<Buffer>> mAudioRenderQueue;
 	std::list<sp<Buffer>> mVideoRenderQueue;
 	Mutex* mQueueMutex ;
 	Condition* mQueueCond ;
+	Condition* mFullCond ;
 	sp<BufferManager> mBM;
 
 	sp<SaveFile> mDebugFile ;

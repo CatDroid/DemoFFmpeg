@@ -37,35 +37,35 @@ static void JNICALL native_playmp4 (JNIEnv* env , jobject mp4player , jlong ctx,
 	Mp4player* player = new Mp4player();
 	player->mpDeMuxer = new LocalFileDemuxer(file);
 
-	AVCodecParameters* para = player->mpDeMuxer->getVideoCodecPara();
-	if( para != NULL){
-		switch(para->codec_id){
+	AVCodecParameters* vpara = player->mpDeMuxer->getVideoCodecPara();
+	if( vpara != NULL){
+		switch(vpara->codec_id){
 		case AV_CODEC_ID_H264:
-			player->mpVDecoder  = new H264SWDecoder(para ,  player->mpDeMuxer->getVideoTimebase() );
+			player->mpVDecoder  = new H264SWDecoder(vpara ,  player->mpDeMuxer->getVideoTimebase() );
 			break;
 		default:
-			ALOGE("don NOT support %d " , para->codec_id );
-			assert(para->codec_id == AV_CODEC_ID_H264);
+			ALOGE("don NOT support %d " , vpara->codec_id );
+			assert(vpara->codec_id == AV_CODEC_ID_H264);
 			break;
 		}
 	}
 
-	para = player->mpDeMuxer->getAudioCodecPara();
-	if( para != NULL){
-		switch(para->codec_id){
+	AVCodecParameters* apara = player->mpDeMuxer->getAudioCodecPara();
+	if( apara != NULL){
+		switch(apara->codec_id){
 		case AV_CODEC_ID_AAC:
-			player->mpADecoder = new AACSWDecoder(para ,  player->mpDeMuxer->getAudioTimebase()  );
+			player->mpADecoder = new AACSWDecoder(apara ,  player->mpDeMuxer->getAudioTimebase()  );
 			break;
 		default:
-			ALOGE("don NOT support %d " , para->codec_id );
-			assert(para->codec_id == AV_CODEC_ID_AAC);
+			ALOGE("don NOT support %d " , apara->codec_id );
+			assert(apara->codec_id == AV_CODEC_ID_AAC);
 			break;
 		}
 	}
 
-
-	player->mpView = new SurfaceView(ANativeWindow_fromSurface(env,surface), para->width, para->height );
-	player->mpTrack = new AudioTrack();
+	// release at SurfaceView
+	player->mpView = new SurfaceView(ANativeWindow_fromSurface(env,surface), vpara->width, vpara->height );
+	player->mpTrack = new AudioTrack(apara->channels, apara->sample_rate);
 	player->mpRender = new RenderThread(player->mpView, player->mpTrack);
 
 
@@ -95,6 +95,7 @@ static void JNICALL native_stop (JNIEnv* jenv , jobject mp4player, jlong ctx)
 	delete player->mpRender;
 	delete player->mpTrack;
 	delete player->mpView;
+
 
 }
 

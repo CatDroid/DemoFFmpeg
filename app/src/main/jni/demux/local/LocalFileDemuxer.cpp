@@ -370,6 +370,7 @@ void LocalFileDemuxer::loop()
 		if (!mLoop) break;
 
 		pkt = mPm->pop();
+		//ALOGD("before read packet %p %d " , pkt->packet()->data, pkt->packet()->size);
 
 		/*
 		 * 在从一个视频文件中的包中用例程 av_read_packet()来读取数据时,一个视频帧的信息通常可以包含在几个包里
@@ -385,7 +386,15 @@ void LocalFileDemuxer::loop()
 		int ret = av_read_frame(mAvFmtCtx, pkt->packet());
 		if (ret < 0) {
 			if ((ret == AVERROR_EOF || avio_feof(mAvFmtCtx->pb)) && ! mEof ) {
-				mEof = 1;
+				ALOGD("End Of File!");
+				mEof = true;
+				/*
+				 * 推送特殊包给到解码线程 --> 推送特殊包给显示线程
+				 *
+				 * */
+				mVideoSinker->put(NULL);
+				mAudioSinker->put(NULL);
+				break;
 			}
 			if (mAvFmtCtx->pb && mAvFmtCtx->pb->error){
 				ALOGD("ERROR mAvFmtCtx ERROR ");

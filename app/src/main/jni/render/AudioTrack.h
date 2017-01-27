@@ -35,8 +35,11 @@ private:
 
 	static void playerCallback(SLAndroidSimpleBufferQueueItf bq, void *context);
 	void playerCallback(SLAndroidSimpleBufferQueueItf bq );
+
+	friend class RenderThread;
+	bool isStoped() { return mStoped ; }
 public:
-	AudioTrack();
+	AudioTrack(uint32_t channel /*1 or 2 */, uint32_t sample_rate /*unit:Hz*/);
 	~AudioTrack();
 	bool setVolume( float volume);
 	bool setMute( bool mute );
@@ -47,8 +50,10 @@ public:
 	std::list<sp<Buffer>> mBuf;
 	bool mStop;
 	bool mStarted;
+	volatile  bool mStoped;
 
 	double pts() const {return mCurrentPts;}
+
 private:
 	double mCurrentPts ;
 

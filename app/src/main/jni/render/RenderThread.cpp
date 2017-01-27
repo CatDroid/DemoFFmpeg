@@ -13,7 +13,7 @@
 
 #include "RenderThread.h"
 
-
+#define VIDEO_RENDER_BUFFER_SIZE 20
 RenderThread::RenderThread(SurfaceView* view , AudioTrack* track ):
 									mpView(view),mpTrack(track),mStop(false),
 									mpSwsCtx(NULL),mSrcFrame(NULL),mDstFrame(NULL),mRenderTh(-1),
@@ -23,6 +23,7 @@ RenderThread::RenderThread(SurfaceView* view , AudioTrack* track ):
 
 	mQueueMutex = new Mutex();
 	mQueueCond = new Condition();
+	mFullCond = new Condition();
 
 	int ret = ::pthread_create(&mRenderTh , NULL ,  renderloop , this );
 	if( ret != 0 ){
@@ -39,12 +40,14 @@ RenderThread::~RenderThread()
 		{
 			AutoMutex l(mQueueMutex);
 			mQueueCond->signal();
+			mFullCond->signal();
 		}
 		ALOGD("~RenderThread Join ");
 		::pthread_join(mRenderTh , NULL );
 		mRenderTh = -1;
 		delete mQueueMutex; mQueueMutex = NULL;
 		delete mQueueCond; mQueueCond = NULL;
+		delete mFullCond; mFullCond = NULL;
 	}
 	if( mpSwsCtx != 0 ) {
 		sws_freeContext(mpSwsCtx);
@@ -81,42 +84,62 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 
 	sp<Buffer> rgbbuf = mBM->pop();
 
-	av_image_fill_arrays(mSrcFrame->data, mSrcFrame->linesize, buf->data() , (AVPixelFormat)buf->fmt() /*AV_PIX_FMT_YUV420P*/, buf->width(), buf->height(), 1);
-	av_image_fill_arrays(mDstFrame->data, mDstFrame->linesize, rgbbuf->data() , AV_PIX_FMT_RGBA, buf->width(), buf->height(), 1);
+	if(buf == NULL){// End Of File
+		ALOGW("RenderThread get End oF File");
+		rgbbuf = NULL ;
+	}else{
+		/*
+	 * av_image_xxx 系列 比  avpicture_xxx系列 增加了 linesize的alian对齐参数
+	 */
+		av_image_fill_arrays(mSrcFrame->data, mSrcFrame->linesize, buf->data() , (AVPixelFormat)buf->fmt() /*AV_PIX_FMT_YUV420P*/, buf->width(), buf->height(), 1);
+		av_image_fill_arrays(mDstFrame->data, mDstFrame->linesize, rgbbuf->data() , AV_PIX_FMT_RGBA, buf->width(), buf->height(), 1);
 
 
-	/*
-		 * @param c         上下文 sws_getContext()
-		 * @param srcSlice  数组 包含源slice的各个平面的指针
-		 * @param srcStride 数组 包含源image的各个平面的步幅
-		 * @param srcSliceY 将要处理slice在源image的位置 也就是 image第一行的位置(从0开始)
-		 * @param srcSliceH 源slice的高度, 也就是slice的行数
-		 * @param dst       数组 包含目标image的各个平面的指针
-		 * @param dstStride 数组 包含目标image的各个平面的步幅(大小? stride)
-		 * @return          输出的高度? the height of the output slice
-		 */
-	int ret  = sws_scale( mpSwsCtx,
-						  mSrcFrame->data,
-						  mSrcFrame->linesize,
-						  0,
-						  buf->height(),
-						  mDstFrame->data, mDstFrame->linesize );
-	// 不需要把AVFrame mDstFrame 进行 av_image_copy_to_buffer 因为RGBA只有一个平面 已经转换到了目标Buffer
-	//if( ret != height ){
-	//	ALOGE("sws_scale result %d ", ret ); // ????
-	//}
+		/*
+             * @param c         上下文 sws_getContext()
+             * @param srcSlice  数组 包含源slice的各个平面的指针
+             * @param srcStride 数组 包含源image的各个平面的步幅
+             * @param srcSliceY 将要处理slice在源image的位置 也就是 image第一行的位置(从0开始)
+             * @param srcSliceH 源slice的高度, 也就是slice的行数
+             * @param dst       数组 包含目标image的各个平面的指针
+             * @param dstStride 数组 包含目标image的各个平面的步幅(大小? stride)
+             * @return          输出的高度? the height of the output slice
+             */
+		int ret  = sws_scale( mpSwsCtx,
+							  mSrcFrame->data,
+							  mSrcFrame->linesize,
+							  0,
+							  buf->height(),
+							  mDstFrame->data, mDstFrame->linesize );
+		// 不需要把AVFrame mDstFrame 进行 av_image_copy_to_buffer 因为RGBA只有一个平面 已经转换到了目标Buffer
+		//if( ret != height ){
+		//	ALOGE("sws_scale result %d ", ret ); // ????
+		//}
 
-	//ALOGD("linesize[0] = %d , mRGBSize = %d " ,mDstFrame->linesize[0] * buf->height() , mRGBSize );
-	rgbbuf->width() = buf->width();
-	rgbbuf->height() = buf->height() ;
-	rgbbuf->pts() = buf->pts();
-	rgbbuf->size() = mRGBSize ;
+		//ALOGD("linesize[0] = %d , mRGBSize = %d " ,mDstFrame->linesize[0] * buf->height() , mRGBSize );
+		rgbbuf->width() = buf->width();
+		rgbbuf->height() = buf->height() ;
+		rgbbuf->pts() = buf->pts();
+		rgbbuf->size() = mRGBSize ;
+	}
 
-	{
+
+	while(!mStop){
 		AutoMutex l(mQueueMutex);
 		bool empty = mVideoRenderQueue.empty();
-		mVideoRenderQueue.push_back(rgbbuf);
-		if(empty) mQueueCond->signal();
+		if(empty){
+			mVideoRenderQueue.push_back(rgbbuf);
+			mQueueCond->signal();
+		}else{
+			if( mVideoRenderQueue.size() >= VIDEO_RENDER_BUFFER_SIZE ){
+				ALOGW("too much video RenderBuffer wait!");
+				mFullCond->wait(mQueueMutex);
+				continue ;
+			}else{
+				mVideoRenderQueue.push_back(rgbbuf);
+			}
+		}
+		break;
 	}
 
 }
@@ -136,10 +159,12 @@ void RenderThread::loop()
 		sp<Buffer> vbuf = NULL;
 		{
 			AutoMutex l(mQueueMutex);
-			if( ! mVideoRenderQueue.empty()   )
+			if( ! mVideoRenderQueue.empty()  )
 			{
+				int size = mVideoRenderQueue.size();
 				vbuf = mVideoRenderQueue.front();
 				mVideoRenderQueue.pop_front();
+				if( size >= VIDEO_RENDER_BUFFER_SIZE ) mFullCond->signal();
 			}else{
 				if( mStop ) break;
 				mQueueCond->wait(mQueueMutex);
@@ -147,7 +172,10 @@ void RenderThread::loop()
 			}
 		}
 
-		if( vbuf == NULL) continue ;
+		if( vbuf == NULL) {
+			ALOGW("video render thread: End Of File !");
+			break;
+		}
 
 		int64_t now = getCurTimeMs()  ;
 		if( mStartSys == -1 ){
@@ -170,9 +198,15 @@ void RenderThread::loop()
 		ALOGD("draw w %d h %d pts %lld size %d A-V %f" ,  vbuf->width(), vbuf->height() , vbuf->pts() , vbuf->size() , (mpTrack->pts() - vbuf->pts()) );
 		mpView->draw(vbuf->data() , vbuf->size() ,vbuf->width(), vbuf->height() );
 
-
-
 	}
+
+
+	while( !mStop && !mpTrack->isStoped() ){
+		ALOGW("video render thread wait for audio render thread mStop = %d isStoped = %d " , mStop , mpTrack->isStoped());
+		usleep(10*1000);
+	}
+	ALOGW("video render thread Exit mStop = %d isStoped = %d " , mStop , mpTrack->isStoped());
+
 }
 
 void* RenderThread::renderloop(void* arg)

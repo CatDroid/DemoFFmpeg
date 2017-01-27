@@ -80,13 +80,22 @@ void AACSWDecoder::loop( ){
 	AVFrame *frame = av_frame_alloc();
 	int got_frame = 0 ;
 
+	bool end = false ;
+	AVPacket endpack = {
+			.data = NULL ,
+			.size = 0,
+			.dts = AV_NOPTS_VALUE,
+			.pts = AV_NOPTS_VALUE
+	};
+
 
 	int ret = 0 ;
 	while(! mStop ){
 
 
 		sp<MyPacket> mypkt = NULL ;
-		{
+		if( ! end  ){
+
 			AutoMutex l(mQueueMutex);
 			if( mPacketQueue.empty() == false )
 			{
@@ -95,27 +104,47 @@ void AACSWDecoder::loop( ){
 				mSourceCond->signal();
 			}else{
 				if(mStop)break;
-				ALOGD("wait for aac avpacket ");
+				ALOGD("Loop:wait for aac avpacket ");
 				mSinkCond->wait(mQueueMutex);
 				continue;
 			}
-
 		}
+
+		AVPacket* packet = NULL;
+		if( mypkt.get() == NULL){
+			if(!end){
+				ALOGW("Loop:End Of file ");
+				/*
+				 * 把所有的解码获取出来 因为还有其他的帧还在内部
+				 * 可以检测ffmpeg解码器的capabilities 如果具备CODEC_CAP_DELAY 那么应该(或者是必须)在解码完所有帧后
+				 * 继续循环调用解码接口,同时把输入包AVPacket的数据指针置为NULL,大小置为0.直到返回got_pictrue为0为止
+				 *
+				 * */
+
+				end = true ;
+			}
+			ALOGW("Loop:get remaing frame from audio decoder ");
+			packet = &endpack;
+		}else{
+			packet = mypkt->packet();
+		}
+
+
 
 		{
 			ALOGD(">[dts %ld pts %ld] %02x %02x %02x %02x %02x" ,
-				  mypkt->packet()->dts,
-				  mypkt->packet()->pts,
-				  mypkt->packet()->data[0],
-				  mypkt->packet()->data[1],
-				  mypkt->packet()->data[2],
-				  mypkt->packet()->data[3],
-				  mypkt->packet()->data[4]
+				  packet->dts,
+				  packet->pts,
+				  (packet->data)?packet->data[0]:0xFF,
+				  (packet->data)?packet->data[1]:0xFF,
+				  (packet->data)?packet->data[2]:0xFF,
+				  (packet->data)?packet->data[3]:0xFF,
+				  (packet->data)?packet->data[4]:0xFF
 				);
 			// @deprecated Use avcodec_send_packet() and avcodec_receive_frame().
 //#pragma GCC diagnostic push
 //#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-			ret  = avcodec_decode_audio4(mAudioCtx, frame, &got_frame, mypkt->packet());
+			ret  = avcodec_decode_audio4(mAudioCtx, frame, &got_frame, packet );
 //#pragma GCC diagnostic pop
 			if( ret < 0 ){
 				ALOGE("avcodec_decode_video2 fail ");
@@ -173,7 +202,12 @@ void AACSWDecoder::loop( ){
 
 				av_frame_unref(frame);
 			}else{
-				ALOGE("AAC SWDecoder get Nothing !");
+				ALOGE("Loop:AAC SWDecoder get Nothing !");
+				if(end) {
+					ALOGW("Loop:Audio Decode last frame done !");
+					mpRender->renderAudio(NULL) ;
+					break;
+				}
 			}
 		}
 		mypkt = NULL;

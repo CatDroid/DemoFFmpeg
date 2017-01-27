@@ -15,7 +15,7 @@
 //#define SAVE_DECODE_TO_FILE
 
 #define AUDIO_RENDER_BUFFER_SIZE 10
-AudioTrack::AudioTrack():mStop(false),mStarted(false)
+AudioTrack::AudioTrack(uint32_t channel, uint32_t sample_rate) : mStop(false), mStarted(false),mStoped(false)
 {
 	SLresult result;
 
@@ -82,18 +82,25 @@ AudioTrack::AudioTrack():mStop(false),mStarted(false)
 	SLDataFormat_PCM format_pcm = {
 		SL_DATAFORMAT_PCM,
 		2, 							// channel
-		SL_SAMPLINGRATE_44_1,		// sample rate in mili second
+		sample_rate*1000,    		// sample rate in mili second , SL_SAMPLINGRATE_44_1
 		SL_PCMSAMPLEFORMAT_FIXED_16,// bit per sample
 		SL_PCMSAMPLEFORMAT_FIXED_16 ,
 		SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT, // SL_SPEAKER_FRONT_CENTER 是 单通道
 		SL_BYTEORDER_LITTLEENDIAN};
 
-	/*
-	if (channel == 2)
+
+	if (channel == 2){
+		format_pcm.numChannels = 2 ;
 		format_pcm.channelMask = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
-	else
+	} else if(channel == 1 ) {
+		format_pcm.numChannels = 1 ;
 		format_pcm.channelMask = SL_SPEAKER_FRONT_CENTER;
-	*/
+	} else {
+		ALOGE("Audio Channel should be 1 or 2 ");
+		format_pcm.numChannels = 2 ;
+		format_pcm.channelMask = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
+	}
+
 
 	SLDataSource audioSrc = {&loc_bufq, &format_pcm};
 
@@ -170,7 +177,7 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 	while(!mStop ){
 		AutoMutex l(mBufMux);
 		if(mBuf.empty()){
-			ALOGD("playerCallback wait ");
+			ALOGD("playerCallback:wait ");
 			mBufCon->wait(mBufMux);
 			continue ;
 		}else{
@@ -182,12 +189,17 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 		}
 	}
 
+
+	// 退出检查
 	if( mStop ){
-		ALOGD("Exist playerCallback because mStop == true ");
+		ALOGD("playerCallback:stop  because mStop == true ");
+		mStoped = true ;
 		return ;
 	}
 	if( playbuf.get() == NULL ) {
-		ALOGD("Exist playerCallback because playbuf == NULL ");
+		ALOGW("playerCallback:End of File because playbuf == NULL ");
+		mStoped = true ;
+		mLastQueuedBuffer = NULL;
 		return ;
 	}
 
@@ -344,7 +356,6 @@ bool AudioTrack::write(sp<Buffer> buf)
 		if(empty){
 			mBuf.push_back(buf);
 			mBufCon->signal(); ALOGD("signal ");
-			break;
 		}else{
 			if( mBuf.size() >= AUDIO_RENDER_BUFFER_SIZE ){
 				ALOGW("too much audio RenderBuffer wait!");
@@ -352,9 +363,9 @@ bool AudioTrack::write(sp<Buffer> buf)
 				continue;
 			}else{
 				mBuf.push_back(buf);
-				break;
 			}
 		}
+		break;
 	}
 
     return true  ;
