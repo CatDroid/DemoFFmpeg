@@ -21,7 +21,8 @@ SurfaceView::SurfaceView(ANativeWindow * window , uint32_t width , uint32_t heig
 
 SurfaceView::~SurfaceView()
 {
-
+	ANativeWindow_release(mpSurface);
+	ALOGD("~SurfaceView");
 }
 
 void SurfaceView::draw(uint8_t* pBuf , uint32_t size , uint32_t width  , uint32_t height )
