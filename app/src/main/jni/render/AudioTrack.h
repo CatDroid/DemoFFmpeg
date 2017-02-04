@@ -52,10 +52,10 @@ public:
 	bool mStarted;
 	volatile  bool mStoped;
 
-	double pts() const {return mCurrentPts;}
+	int64_t pts() const {return mCurrentPts;}
 
 private:
-	double mCurrentPts ;
+	int64_t mCurrentPts ; // ms
 
 	sp<Buffer> mLastQueuedBuffer ;
 

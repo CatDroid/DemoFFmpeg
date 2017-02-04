@@ -195,7 +195,7 @@ void RenderThread::loop()
 		//if( vbuf == NULL  ){
 		//	usleep(5000); // 23ms@   16ms@60fps
 		//}
-		ALOGD("draw w %d h %d pts %lld size %d A-V %f" ,  vbuf->width(), vbuf->height() , vbuf->pts() , vbuf->size() , (mpTrack->pts() - vbuf->pts()) );
+		ALOGD("draw w %d h %d size %d pts[A:%lld V:%lld ] A-V %lld ms " ,  vbuf->width(), vbuf->height() , vbuf->size() ,mpTrack->pts() ,  vbuf->pts() , (mpTrack->pts() - vbuf->pts()) );
 		mpView->draw(vbuf->data() , vbuf->size() ,vbuf->width(), vbuf->height() );
 
 	}

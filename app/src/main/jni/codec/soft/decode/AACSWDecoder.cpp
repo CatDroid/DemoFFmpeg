@@ -157,6 +157,9 @@ void AACSWDecoder::loop( ){
 					frame->pts = av_frame_get_best_effort_timestamp(frame);
 				}
 
+
+				//  audio没有双向的预测 pts和dts可以看成是一个顺序的，因此可一直采用一个，即可只采用 PTS
+				//
 				ALOGD("<[pts %lld pkt_dts %lld pkt_pts %lld] "
 							  "total number of frames: %d linesize[0]: %d " ,
 					  frame->pts,frame->pkt_dts , frame->pkt_pts,
@@ -190,7 +193,7 @@ void AACSWDecoder::loop( ){
 					int resampled_data_size = len * mAudioCtx->channels  * av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);//每声道采样数 x 声道数 x 每个采样字节数
 					ALOGD( "len = %d resampled_data_size = %d  mDecodedFrameSize = %d " ,len, resampled_data_size,  mDecodedFrameSize );
 					buf->size() = mDecodedFrameSize ;
-					buf->pts() = frame->pts * mTimeBase ;
+					buf->pts() = frame->pts * mTimeBase * 1000 ; // ms
 
 #ifdef SAVE_DECODE_TO_FILE
 					mSaveFile->save(  buf->data()  , buf->size());

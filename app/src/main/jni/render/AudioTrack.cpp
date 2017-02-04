@@ -256,6 +256,7 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 		 * buffer for playback.
 		 */
 		mLastQueuedBuffer = playbuf ;
+		mCurrentPts = playbuf->pts();
 	}
 	//ALOGD("cost time %lld " , ch.Get());
 	// 一次回调  只能调用一次 Enqueue
@@ -343,7 +344,6 @@ bool AudioTrack::write(sp<Buffer> buf)
 			ALOGE("Enqueue ERROR !");
 		}
 		mStarted = true ;
-		//mCurrentPts = buf->pts();
 		mLastQueuedBuffer = buf ;
 		ALOGD("first write , enqueue ");
 		return true ;
