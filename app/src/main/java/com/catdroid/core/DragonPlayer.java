@@ -57,8 +57,8 @@ public class DragonPlayer {
 	 * 设置数据源
 	 * @return false:路径不合法
      * @param path 文件路径 本地文件 file:///mnt/sdcard/test.mp4  file://+绝对路径
-     * 					   rtsp直播 rtsp:://192.168.1.187:8086
-     * 					   rtsp回放 rtsp:://192.168.1.187:8086/test.mp4
+     * 					   rtsp直播 rtsp://192.168.1.187:8086
+     * 					   rtsp回放 rtsp://192.168.1.187:8086/test.mp4
 	 * @throws IllegalArgumentException 参数路径为空
 	 * @throws IllegalStateException 已经调用release释放
      * @see android.media.MediaPlayer

@@ -38,11 +38,6 @@ public class DragonBuffer {
             //native_releaseBuffer(mNativeCtx);
             mNativeCtx = 0 ;
         }
-
-
-
-
-
     }
 
 }

@@ -44,6 +44,9 @@ public class FFmpegActivity extends Activity {
 			}
 		});
 	}
+	private Activity getActivity(){
+		return this;
+	}
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -62,51 +65,61 @@ public class FFmpegActivity extends Activity {
 			@Override
 			public void onClick(View v) {
 
-				if (mSurfaceCreated) {
-					if (mPlayer == null) {
+			if (mSurfaceCreated) {
+				if (mPlayer == null) {
+					mPlayer = new DragonPlayer();
+					mPlayer.setSurface(mSh.getSurface());
+					mPlayer.setDataSource("file:///mnt/sdcard/screen_mic_main_r30_g30_ultrafast_c2_44k_6000K_128K_yuv444.mp4");
+					mPlayer.setOnPreparedListener(new DragonPlayer.OnPreparedListener(){
+						@Override
+						public void onPrepared(DragonPlayer mp, int what) {
+							mp.play();
+						}
+					});
+					mPlayer.setOnCompletionListener(new DragonPlayer.OnCompletionListener() {
+						@Override
+						public void onCompletion(DragonPlayer mp) {
+							String msg = "play complete";
+							toastMessage(msg);
+							Log.w(TAG, msg);
+							mPlayer.stop();
+							mPlayer.release();
+							mPlayer = null;
+						}
+					});
+					mPlayer.setOnErrorListener(new DragonPlayer.OnErrorListener(){
 
-//						int sampleRate = CONFIG_AUDIO_SAMPLE;
-//						int channel = AudioFormat.CHANNEL_OUT_STEREO;
-//						int depth = AudioFormat.ENCODING_PCM_16BIT;
-//
-//						if (CONFIG_AUDIO_CHANNEL == 1) {
-//							channel = AudioFormat.CHANNEL_OUT_MONO;
-//						}
-//
-//						if (CONFIG_AUDIO_DEPTH == 8) {
-//							depth = AudioFormat.ENCODING_PCM_8BIT;
-//						}
+						@Override
+						public boolean onError(DragonPlayer mp, int what, int extra) {
+							String msg = "play Error what = " + what  + " extra " + extra;
+							toastMessage( msg);
+							Log.e(TAG,msg);
+							mPlayer.stop();
+							mPlayer.release();
+							mPlayer = null;
+							return true ;
+						}
+					});
 
-//						int bufferSize = AudioTrack.getMinBufferSize(sampleRate, channel, depth);
-//						AudioTrack at = new AudioTrack(AudioManager.STREAM_MUSIC, sampleRate, channel, depth,
-//								bufferSize, AudioTrack.MODE_STREAM);
-
-//						at.setVolume(1.0f);
-//						at.play();
-						mPlayer = new DragonPlayer();
-
-						//mPlayer.playmp4("/mnt/sdcard/wushun.3gp", mSh.getSurface(), null);
-						//mPlayer.playmp4("/mnt/sdcard/1080p60fps.mp4", mSh.getSurface(), null);
-						mPlayer.playmp4("/mnt/sdcard/screen_mic_main_r30_g30_ultrafast_c2_44k_6000K_128K_yuv444.mp4", mSh.getSurface(), null);
-
-					} else {
-						toastMessage("please stop befor play again");
-					}
 
 				} else {
-					toastMessage("surface not ready now !");
+					toastMessage("please stop befor play again");
 				}
+
+			} else {
+				toastMessage("surface not ready now !");
+			}
 			}
 		});
 
 		((Button) findViewById(R.id.bStop)).setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View v) {
-
-				if (mPlayer != null) {
-					mPlayer.stop();
-					mPlayer = null;
-				}
+			if (mPlayer != null) {
+				mPlayer.stop();
+				mPlayer.release();
+				mPlayer = null;
+			}
 			}
 		});
 
