@@ -345,9 +345,9 @@ public class DragonPlayer {
 	private native void native_free(long ctx );
 
 	private native boolean native_setDisplay(long player_ctx, Surface surface );
-	private native boolean native_play(long ctx );
-	private native boolean native_pause(long ctx);
-	private native boolean native_seekTo(long ctx , int msec);
+	private native void native_play(long ctx );
+	private native void native_pause(long ctx);
+	private native void native_seekTo(long ctx , int msec);
 	private native void  native_stop(long ctx);
 
 	private native boolean native_setVolume(long ctx , float left , float right );

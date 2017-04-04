@@ -88,7 +88,7 @@ void MyPacket::reset(sp<PacketManager> pm)
 }
 
 void MyPacket::recycle(){
-    av_packet_unref(mpPacket);
+    av_packet_unref(mpPacket);// 这里会把AVPacket清空 没有AVBufferRef*了
     mPm->push(this);
 }
 

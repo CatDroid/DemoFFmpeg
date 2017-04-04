@@ -53,7 +53,7 @@ void av_log_default_callback(void* ptr, int level, const char* fmt, va_list vl)
  */
 
 
-jboolean register_com_tom_ffmpegAPI_MP4player(JNIEnv* env );
+jboolean register_com_catdroid_core_dragonplayer(JNIEnv *env);
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
 {
@@ -63,8 +63,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
     	return JNI_ERR;
     }
 
-    if( register_com_tom_ffmpegAPI_MP4player(env) != JNI_TRUE){
-    	ALOGE("register_com_tom_ffmpegAPI_MP4player Err");
+    if(register_com_catdroid_core_dragonplayer(env) != JNI_TRUE){
+    	ALOGE("register_com_catdroid_core_dragonplayer Err");
     	return JNI_ERR;
     }
 
