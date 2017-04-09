@@ -51,14 +51,30 @@ LOCAL_SRC_FILES += common/ffmpeg_common.cpp \
 					 common/Buffer.cpp \
 					 common/SaveFile.cpp \
 					 common/MyPacket.cpp
+
+# about JNI
 LOCAL_SRC_FILES += jni_onload.cpp 
-LOCAL_SRC_FILES += com_tom_ffmpegAPI_MP4player.cpp
+LOCAL_SRC_FILES += com_catdroid_core_dragonplayer.cpp
+
+# about player/recoder
+LOCAL_SRC_FILES += player/Player.cpp
+
+# about demuxer
+LOCAL_SRC_FILES += demux/DeMuxer.cpp
 LOCAL_SRC_FILES += demux/local/LocalFileDemuxer.cpp
-LOCAL_SRC_FILES += codec/soft/decode/H264SWDecoder.cpp
-LOCAL_SRC_FILES += codec/soft/decode/AACSWDecoder.cpp
+
+# about decoder
+LOCAL_SRC_FILES += codec/decode/Decoder.cpp
+LOCAL_SRC_FILES += codec/decode/DecoderFactory.cpp
+LOCAL_SRC_FILES += codec/decode/soft/H264SWDecoder.cpp
+LOCAL_SRC_FILES += codec/decode/soft/AACSWDecoder.cpp
+
+# about render
+LOCAL_SRC_FILES += render/Render.cpp
 LOCAL_SRC_FILES += render/AudioTrack.cpp
 LOCAL_SRC_FILES += render/SurfaceView.cpp
 LOCAL_SRC_FILES += render/RenderThread.cpp
+
 
 
 LOCAL_SHARED_LIBRARIES := swscale swresample avutil avformat avcodec
@@ -66,9 +82,11 @@ LOCAL_LDLIBS := -llog -ljnigraphics -landroid -lmediandk -lOpenSLES -latomic
 
 LOCAL_C_INCLUDES += \
 		$(LOCAL_PATH)/common/ \
-		$(LOCAL_PATH)/demux/local \
+		$(LOCAL_PATH)/player/ \
+		$(LOCAL_PATH)/demux/local/ \
 		$(LOCAL_PATH)/demux/ \
-		$(LOCAL_PATH)/codec/soft/decode  \
+		$(LOCAL_PATH)/codec/decode/  \
+		$(LOCAL_PATH)/codec/decode/soft/ \
 		$(LOCAL_PATH)/render/
 		
 include $(BUILD_SHARED_LIBRARY)

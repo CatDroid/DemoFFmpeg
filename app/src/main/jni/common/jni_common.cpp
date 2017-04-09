@@ -18,9 +18,8 @@
 
 JavaVM *g_JVM;
 
-void jni_setJVM(JavaVM * jvm )
-{
-	g_JVM = jvm ;
+void jni_setJVM(JavaVM * jvm ) {
+	g_JVM = jvm ; // JNI_OnLoad @ jni_onload.cpp
 }
 
 int jniThrowException(JNIEnv* env, const char* className, const char* msg) {

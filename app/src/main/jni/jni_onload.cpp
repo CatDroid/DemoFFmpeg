@@ -69,6 +69,9 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
     }
 
     jni_setJVM(vm);
+    av_register_all();
+    // 不加 av_register_all avformat_open_input 会导致 Invalid data found when processing input
+    // 不加  android.permission.READ_EXTERNAL_STORAGE 会导致 Permission denied
 
     av_log_set_callback(av_log_default_callback);
     //av_log_set_level(AV_LOG_INFO); // 没有作用  不会再回调callback的前 过滤 需要自己过滤 cf. av_log_default_callback @ log.c

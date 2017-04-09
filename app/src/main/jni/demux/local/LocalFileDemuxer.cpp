@@ -7,53 +7,156 @@
 
 #include "LocalFileDemuxer.h"
 
-#define LOG_TAG "LocalFileDemuxer"
 #include "jni_common.h"
 #include "ffmpeg_common.h"
 #include "project_utils.h"
+#include "Decoder.h"
 
 #include <netinet/in.h>
 #include <sys/prctl.h>
 
-LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
-				:mAvFmtCtx(NULL),mReadThread(-1),mVstream(-1),mAstream(-1),
-				 mLoop(true),mEof(false),mAudioSinker(NULL),mVideoSinker(NULL)
-{
+CLASS_LOG_IMPLEMENT(LocalFileDemuxer,"LocalFileDemuxer");
 
+LocalFileDemuxer::LocalFileDemuxer(Player* player):
+				 DeMuxer(player),
+				 mAvFmtCtx(NULL),mExtractThID(-1),mVstream(-1),mAstream(-1),
+				 mLoop(true),mPause(false),mEof(false),mParseResult(false) {
 	mPm = new PacketManager( 20 );
-	av_register_all(); 	// 不加 av_register_all avformat_open_input 会导致 Invalid data found when processing input
-						// 不加  android.permission.READ_EXTERNAL_STORAGE 会导致 Permission denied
 
-	ALOGD("open file %s " , file_path );
-	// 	告诉 libavformat 去自动探测文件格式 并且 使用 默认的缓冲区大小
+	mStartMutex = new Mutex();
+	mStartCon = new Condition();
+	TLOGD("LocalFileDemuxer");
+
+}
+/*
+	3gp和mp4 esds pps sps
+ 	AAC的私有数据保存在esds的0x05标签的数据 ， 结构为 05 + 长度 + 内容
+	将长度赋值给 extradatasize		长度的计算函数在ffmpeg中的static int mp4_read_descr_len(ByteIOContext *pb)
+	将内容赋值给 extradata
+	AVC/H264的extradata和extradata信息在avcc atom中
+	将avcc atom去掉type和长度（8个字节）后的长度赋予extradatasize
+	内容赋值给extradata
+ */
+
+void LocalFileDemuxer::prepareAsyn()
+{
+	int ret = ::pthread_create(&mExtractThID, NULL, LocalFileDemuxer::sExtractThread, (void *) this);
+	if(ret != 0 ){
+		TLOGE("LocalFileDemuxer pthread_create fail %d %d %s " , ret ,errno , strerror(errno));
+	}
+	assert(ret == 0);
+}
+
+void LocalFileDemuxer::play() {
+	AutoMutex _l(mStartMutex);
+	mPause = false ;
+	mStartCon->signal();
+
+}
+
+void LocalFileDemuxer::pause() {
+	AutoMutex _l(mStartMutex);
+	mPause = true ;
+}
+
+void LocalFileDemuxer::seekTo(int32_t ms) {
+	TLOGE("NO IMPLEMENT");
+	assert(false);
+}
+
+
+void LocalFileDemuxer::stop()
+{
+	if( mExtractThID != 0 ){
+		{
+			AutoMutex _l(mStartMutex);
+			mStartCon->signal();
+		}
+		mLoop = false ;
+		::pthread_join( mExtractThID  , NULL);
+		mExtractThID = 0 ;
+	}
+	TLOGD("LocalFileDemuxer stop done");
+}
+LocalFileDemuxer::~LocalFileDemuxer()
+{
+	delete mStartMutex  ;
+	delete mStartCon ;
+	TLOGD("LocalFileDemuxer");
+}
+
+const AVCodecParameters* LocalFileDemuxer::getVideoCodecPara()
+{
+	if( mVstream != -1 ){
+		return mAvFmtCtx->streams[mVstream]->codecpar;
+	}
+	return NULL;
+}
+
+const AVCodecParameters* LocalFileDemuxer::getAudioCodecPara()
+{
+	if( mAstream != -1 ){
+		return mAvFmtCtx->streams[mAstream]->codecpar;
+	}
+	return NULL;
+}
+
+
+void LocalFileDemuxer::setupVideoSpec(bool is_pps , bool addLeaderCode , unsigned char *data, int size)
+{
+	if( ! is_pps  )
+	{
+		mSPS.resize( size + (addLeaderCode ? 4 : 0 ) );
+		if( addLeaderCode ) memcpy((void*)mSPS.c_str(), "\x00\x00\x00\x01", 4);
+		memcpy((void*)(mSPS.c_str() + 4), data, size);
+	}
+	else
+	{
+		mPPS.resize( size + (addLeaderCode ? 4 : 0 ) );
+		if( addLeaderCode ) memcpy((void*)mPPS.c_str(), "\x00\x00\x00\x01", 4);
+		memcpy((void*)(mPPS.c_str() + 4), data, size);
+	}
+}
+
+void LocalFileDemuxer::setupAudioSpec(bool addLeaderCode , unsigned char *data, int size)
+{
+	mESDS.resize( size + (addLeaderCode ? 4 : 0 ) );
+	if( addLeaderCode ) memcpy((void*)mESDS.c_str(), "\x00\x00\x00\x01", 4);
+	memcpy((uint8_t*)mESDS.c_str() + 4, data, size);
+}
+
+
+bool LocalFileDemuxer::parseFile() {
+
+	const char* file_path = mUri.c_str() + strlen("file://");// /mnt/sdcard/temp.mp4
+	TLOGD("open file %s " , file_path );
 
 	AVDictionary* dic = NULL;
 	/*
-	 * AVFormatContext **ps 参数需要初始化为 NULL 由avformat_open_input内部分配
-	 * 如果不初始化AVFormatContext* mAvFmtCtx为NULL 会导致 SIGSEGV
+	 * 注意:
+	 * 1. AVInputFormat *fmt == NULL 告诉 libavformat 去自动探测文件格式 并且 使用 默认的缓冲区大小
+	 * 2. AVFormatContext **ps 参数需要初始化为 NULL 由avformat_open_input内部分配
+	 * 	  如果不初始化AVFormatContext* mAvFmtCtx为NULL 会导致 SIGSEGV
 	 */
 	int ret = avformat_open_input(&mAvFmtCtx, file_path, NULL, &dic);
 	if( ret < 0 ){
 		ffmpeg_strerror( ret , "open file error ");
-		return ;
+		return false ;
 	}
 
-	// dic 可能返回空的
+	// DEBUG: 检测avformat_open_input返回的dic 可能返回空的
 	AVDictionaryEntry* entry = NULL;
 	std::string file_input_dict ;
 	while( entry=av_dict_get( dic , "" , entry , 0), entry != NULL ){
-		file_input_dict+= entry->key;
-		file_input_dict+= "\t:";
-		file_input_dict+= entry->value;
-		file_input_dict+="\n";
+		file_input_dict+= entry->key; file_input_dict+= "\t:"; file_input_dict+= entry->value; file_input_dict+="\n";
 	}
-	ALOGD("avformat_open_input dict %p num %d dic:\n%s", dic , av_dict_count(dic), file_input_dict.c_str());
+	TLOGD("avformat_open_input dict %p num %d dic:\n%s", dic , av_dict_count(dic), file_input_dict.c_str());
 	av_dict_free(&dic); // 不再需要 AVDictionary !
 
 
-	// 填充AVFormatContext的流域
-	if( ret = avformat_find_stream_info(mAvFmtCtx, 0), ret < 0 ){
+	if( ret = avformat_find_stream_info(mAvFmtCtx, 0), ret < 0 ){// 填充AVFormatContext的流域
 		ffmpeg_strerror(  ret  , "find stream info error ");
+		return false ;
 	}
 
 
@@ -62,47 +165,45 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 		enum AVMediaType type = st->codecpar->codec_type;
 		if( type == AVMEDIA_TYPE_AUDIO){
 			mAstream  = i ;
-			ALOGI("Found Audio Stream at %d " , mAstream);
+			TLOGI("Found Audio Stream at %d " , mAstream);
 
 		}else if( type == AVMEDIA_TYPE_VIDEO){
 			mVstream = i ;
-			ALOGI("Found Video Stream at %d " , mVstream);
+			TLOGI("Found Video Stream at %d " , mVstream);
 		}else {
-			ALOGI("not video or audio stream : %d " , type );
+			TLOGI("not video or audio stream : %d " , type );
 		}
-		// 打印
-		// AVFormatContext 内部关联到 AVInputFormat iformat 或者AVOutputFormat oformat
-		av_dump_format(mAvFmtCtx,i,file_path,0 /*is_output input(0)*/);
+		// DEBUG:
+		//		打印详细信息
+		// 		AVFormatContext 内部关联到 AVInputFormat iformat 或者 AVOutputFormat oformat
+		av_dump_format(mAvFmtCtx, i, file_path, 0 /*is_output input(0)*/);
 	}
 
 	/*
-	 * 视频的元数据（metadata）信息可以通过AVDictionary获取。元数据存储在AVDictionaryEntry结构体中
-	 * 每一条元数据分为key和value两个属性
-	 * 在ffmpeg中通过av_dict_get( AVFormatContext.metadata 不是 AVCodecContext )函数获得视频的元数据
+	 * 注意：
+	 * 1. 视频的元数据（metadata）信息可以通过AVDictionary获取。元数据存储在AVDictionaryEntry结构体中
+	 * 		在ffmpeg中通过av_dict_get( AVFormatContext.metadata 不是 AVCodecContext )函数获得视频的元数据
+	 * 		每一条元数据分为key和value两个属性
 	 *
-	 * m=av_dict_get(pFormatCtx->metadata,"copyright",NULL,0); // NULL就是不能循环
+	 * 2. m=av_dict_get(pFormatCtx->metadata,"copyright",NULL,0); // NULL就是不能循环
 	 *
 	 */
 	std::string meta ;
 	AVDictionaryEntry *m = NULL;
-	while(m=av_dict_get(mAvFmtCtx->metadata,"",m,AV_DICT_IGNORE_SUFFIX)){
-		meta+= m->key;
-		meta+= "\t:";
-		meta+= m->value;
-		meta+="\n";
+	while( m=av_dict_get(mAvFmtCtx->metadata,"",m,AV_DICT_IGNORE_SUFFIX), m!=NULL){
+		meta+= m->key; meta+= "\t:"; meta+= m->value; meta+="\n";
 	}
-	ALOGD("AVFormat meta:\n%s", meta.c_str());
+	TLOGD("AVFormat meta:\n%s", meta.c_str());
 
 	if( mVstream != -1 )
 	{	// 获取视频流信息: 宽 高 比特率 帧率 视频时长 帧数目 时基(timebase) 解码器特定参数(sps pps)
 
- 		AVCodecParameters * para = mAvFmtCtx->streams[mVstream]->codecpar;
-
+		AVCodecParameters * para = mAvFmtCtx->streams[mVstream]->codecpar;
 		AVCodecID codecID = para->codec_id ;
 		if( codecID == AV_CODEC_ID_H264 ) {
-			ALOGD("video stream is H264");
+			TLOGD("video stream is H264");
 		}else{
-			ALOGE("video stream is unknown codecID %d " , codecID);
+			TLOGE("video stream is unknown codecID %d " , codecID);
 		}
 
 		AVStream* pStream = mAvFmtCtx->streams[mVstream];
@@ -113,24 +214,31 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 		mVTimebase = av_q2d(pStream->time_base); // 1 / 90,000
 
 
-		ALOGD("file duration %d us  %d ms "  ,mAvFmtCtx->duration , mAvFmtCtx->duration/1000 );
-		ALOGD("video stream (%d,%d), video bitrate=%lld,  fps=%.2f, "
-				"sample_format %d (maybe is %s ),"
-				"base=%d/%d, nb_frames=%lld, duration=%lld(in in stream time base %f) "
-				"duration=%.4f(second )",
-				para->width,
-				para->height,
-				para->bit_rate,
-				fps,
-				sample_fmt, (sample_fmt==AV_PIX_FMT_YUV420P?"yuv420":"unknown") ,
-				pStream->time_base.num, pStream->time_base.den,
-				pStream->nb_frames, 	pStream->duration,
-			    mVTimebase,
-				pStream->duration * mVTimebase );
+		TLOGD("文件时长 %d us  %d ms "  ,
+			  mAvFmtCtx->duration ,
+			  mAvFmtCtx->duration/1000 );
+
+		TLOGD("视频流(%d,%d):\n"
+					  "比特率=%lld\n"
+					  "帧率=%.2f\n"
+					  "像素格式 %d (可能是 %s )\n"
+					  "时间基准 %d/%d\n"
+					  "该流总帧数 %lld\n"
+					  "时长 %lld(in in stream time base %f)\n"
+					  "时长 %.4f(second )\n",
+			  para->width,
+			  para->height,
+			  para->bit_rate,
+			  fps,
+			  sample_fmt, (sample_fmt==AV_PIX_FMT_YUV420P?"yuv420":"unknown") ,// 注意:有些片源是YUV422 YUV444等,可能在某些播放器无法播放
+			  pStream->time_base.num, pStream->time_base.den,
+			  pStream->nb_frames, 	pStream->duration,
+			  mVTimebase,
+			  pStream->duration * mVTimebase );
 
 		uint8_t *src = para->extradata + 5;
 		int extradata_size = para->extradata_size ;
-		ALOGD("video extradata_size = %d ", extradata_size );
+		TLOGD("video extradata_size = %d ", extradata_size );
 		DUMP_BUFFER_IN_HEX("video csd:",para->extradata, para->extradata_size);
 
 		{//sps
@@ -155,9 +263,9 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 
 		AVCodecID codecID = para->codec_id ;
 		if( codecID == AV_CODEC_ID_AAC ) {
-			ALOGD("audio stream is AAC");
+			TLOGD("audio stream is AAC");
 		}else{
-			ALOGE("audio stream is unknown codecID %d " , codecID);
+			TLOGE("audio stream is unknown codecID %d " , codecID);
 		}
 
 		AVStream* pStream = mAvFmtCtx->streams[mAstream];
@@ -203,7 +311,7 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 		 * 		对于packed类型，所有的数据在同一个数据平面中，不同通道的数据交叉保存
 		 *
 		 */
-		ALOGD("Audio Stream Param:\ncodecid=%d(see AVCodecID)\n"
+		TLOGD("音频流:\ncodecid=%d(see AVCodecID)\n"
 					  "帧大小 %d(样本数/每通道)\n"
 					  "帧时长 %d ms \n"
 					  "帧大小 %d(字节/所有通道)\n"
@@ -213,11 +321,11 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 					  "采样率 %d\n"
 					  "每样本大小 %d字节\n"
 					  "每样本大小 %dbits\n"
-			          "时间基准 %d/%d\n"
-		              "总帧数 %lld\n"
+					  "时间基准 %d/%d\n"
+					  "总帧数 %lld\n"
 					  "时长 %lld(单位为时间基准 %f)\n"
 					  "时长 %.4f(秒 )\n"
-			          "时长 %.4f(秒 根据帧数和帧时长计算)\n",
+					  "时长 %.4f(秒 根据帧数和帧时长计算)\n",
 			  para->codec_id ,
 			  para->frame_size,
 			  para->frame_size * 1000 / para->sample_rate ,
@@ -242,7 +350,7 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 		//esds
 		uint8_t *src = para->extradata ;
 		int extradata_size = para->extradata_size ;
-		ALOGD("audio extradata_size = %d ", extradata_size );
+		TLOGD("audio extradata_size = %d ", extradata_size );
 		DUMP_BUFFER_IN_HEX("audio csd:" ,para->extradata, para->extradata_size);
 
 		setupAudioSpec( true , src, extradata_size);
@@ -250,92 +358,9 @@ LocalFileDemuxer::LocalFileDemuxer(const char * file_path)
 
 	}
 
-	ALOGD("avformat_open done !");
-
+	TLOGD("avformat_open done !");
+	return true ;
 }
-/*
-	3gp和mp4 esds pps sps
- 	AAC的私有数据保存在esds的0x05标签的数据 ， 结构为 05 + 长度 + 内容
-	将长度赋值给 extradatasize		长度的计算函数在ffmpeg中的static int mp4_read_descr_len(ByteIOContext *pb)
-	将内容赋值给 extradata
-	AVC/H264的extradata和extradata信息在avcc atom中
-	将avcc atom去掉type和长度（8个字节）后的长度赋予extradatasize
-	内容赋值给extradata
- */
-
-void LocalFileDemuxer::play()
-{
-	int ret = ::pthread_create(&mReadThread, NULL, LocalFileDemuxer::extractThread, (void*)this  );
-}
-
-void LocalFileDemuxer::stop()
-{
-	if( mReadThread != 0 ){
-		mLoop = false ;
-		::pthread_join( mReadThread  , NULL);
-		mReadThread = 0 ;
-	}
-	ALOGD("LocalFileDemuxer stop done");
-}
-LocalFileDemuxer::~LocalFileDemuxer()
-{
-	ALOGD("~LocalFileDemuxer ");
-}
-
-AVCodecParameters* LocalFileDemuxer::getVideoCodecPara()
-{
-	if( mVstream != -1 ){
-		return mAvFmtCtx->streams[mVstream]->codecpar;
-	}
-	return NULL;
-}
-
-AVCodecParameters* LocalFileDemuxer::getAudioCodecPara()
-{
-	if( mAstream != -1 ){
-		return mAvFmtCtx->streams[mAstream]->codecpar;
-	}
-	return NULL;
-}
-
-
-
-
-void LocalFileDemuxer::setupVideoSpec(bool is_pps , bool addLeaderCode , unsigned char *data, int size)
-{
-	if( ! is_pps  )
-	{
-		mSPS.resize( size + (addLeaderCode ? 4 : 0 ) );
-		if( addLeaderCode ) memcpy((void*)mSPS.c_str(), "\x00\x00\x00\x01", 4);
-		memcpy((void*)(mSPS.c_str() + 4), data, size);
-	}
-	else
-	{
-		mPPS.resize( size + (addLeaderCode ? 4 : 0 ) );
-		if( addLeaderCode ) memcpy((void*)mPPS.c_str(), "\x00\x00\x00\x01", 4);
-		memcpy((void*)(mPPS.c_str() + 4), data, size);
-	}
-}
-
-void LocalFileDemuxer::setupAudioSpec(bool addLeaderCode , unsigned char *data, int size)
-{
-	mESDS.resize( size + (addLeaderCode ? 4 : 0 ) );
-	if( addLeaderCode ) memcpy((void*)mESDS.c_str(), "\x00\x00\x00\x01", 4);
-	memcpy((uint8_t*)mESDS.c_str() + 4, data, size);
-}
-
-
-void LocalFileDemuxer::setAudioSinker(DeMuxerSinkBase* audioSinker)
-{
-	if( mAudioSinker != NULL ) ALOGW("multi called setAudioSinker ");
-	mAudioSinker = audioSinker ;
-}
-void LocalFileDemuxer::setVideoSinker(DeMuxerSinkBase* videoSinker)
-{
-	if( mVideoSinker != NULL ) ALOGW("multi called setVideoSinker ");
-	mVideoSinker = videoSinker ;
-}
-
 
 void LocalFileDemuxer::loop()
 {
@@ -346,31 +371,43 @@ void LocalFileDemuxer::loop()
     static int64_t start_time = AV_NOPTS_VALUE;  // 定义开始播放的时间和结束时间
     int64_t duration = AV_NOPTS_VALUE  ;
 
-    /**
-     * Decoding: pts of the first frame of the stream in presentation order, in stream time base.
-     * Only set this if you are absolutely 100% sure that the value you set
-     * it to really is the pts of the first frame.
-     * This may be undefined (AV_NOPTS_VALUE).
-     * @note The ASF header does NOT contain a correct start_time the ASF
-     * demuxer must NOT set this.
-     */
+
     int64_t video_start_time = mAvFmtCtx->streams[mVstream]->start_time ;
     int64_t audio_start_time =  mAvFmtCtx->streams[mAstream]->start_time ;
     double video_timebase = av_q2d(mAvFmtCtx->streams[mVstream]->time_base) ;
     double audio_timebase = av_q2d(mAvFmtCtx->streams[mAstream]->time_base) ;
 
-    ALOGD("video stream start %lld(time base %f) %f(sec) , ",
+    TLOGD("video stream start %lld(time base %f) %f(sec) , ",
     		video_start_time , video_timebase ,( video_start_time == AV_NOPTS_VALUE ? -1 : video_start_time * video_timebase )
     		);
-    ALOGD("audio stream start %lld(time base %f)  %f(sec)" ,
+    TLOGD("audio stream start %lld(time base %f)  %f(sec)" ,
     		audio_start_time , audio_timebase , (audio_start_time == AV_NOPTS_VALUE ? -1 : audio_start_time * audio_timebase )
     		);
+
+	mParseResult = parseFile();
+	mPlayer->prepare_result();
+	if(! mParseResult ){
+		TLOGE("parseFile error, loop exit");
+		return ;
+	}else{
+		TLOGW("parseFile success , wait for playing");
+	}
+	{
+		AutoMutex _l(mStartMutex);
+		mStartCon->wait(mStartMutex);
+	}
 
 	for (;;) {
 		if (!mLoop) break;
 
+		if( mPause ) {
+			AutoMutex _l(mStartMutex);
+			mStartCon->wait(mStartMutex);
+			continue ;
+		}
+
 		pkt = mPm->pop();
-		//ALOGD("before read packet %p %d " , pkt->packet()->data, pkt->packet()->size);
+		//TLOGD("before read packet %p %d " , pkt->packet()->data, pkt->packet()->size);
 
 		/*
 		 * 在从一个视频文件中的包中用例程 av_read_packet()来读取数据时,一个视频帧的信息通常可以包含在几个包里
@@ -386,18 +423,18 @@ void LocalFileDemuxer::loop()
 		int ret = av_read_frame(mAvFmtCtx, pkt->packet());
 		if (ret < 0) {
 			if ((ret == AVERROR_EOF || avio_feof(mAvFmtCtx->pb)) && ! mEof ) {
-				ALOGD("End Of File!");
+				TLOGD("End Of File!");
 				mEof = true;
 				/*
 				 * 推送特殊包给到解码线程 --> 推送特殊包给显示线程
 				 *
 				 * */
-				mVideoSinker->put(NULL);
-				mAudioSinker->put(NULL);
+				mADecoder->put(NULL);
+				mVDecoder->put(NULL);
 				break;
 			}
 			if (mAvFmtCtx->pb && mAvFmtCtx->pb->error){
-				ALOGD("ERROR mAvFmtCtx ERROR ");
+				TLOGD("ERROR mAvFmtCtx ERROR ");
 				ffmpeg_strerror(mAvFmtCtx->pb->error);
 				break;
 			}
@@ -408,13 +445,13 @@ void LocalFileDemuxer::loop()
 		stream_start_time = mAvFmtCtx->streams[pkt->packet()->stream_index]->start_time; // 时间单位是 该流的 time base
 
 		if (pkt->packet()->stream_index == mAstream  ) {
-			ALOGD("audio dts = %ld , pts=%f,dts=%f,duration %f" ,
+			TLOGD("audio dts = %ld , pts=%f,dts=%f,duration %f" ,
 				  pkt->packet()->dts ,
 				  pkt->packet()->pts * audio_timebase ,
 				  pkt->packet()->dts * audio_timebase ,
 				  pkt->packet()->duration* audio_timebase  );
 			//pkt->pts = pkt->pts * audio_timebase * 1000  ; // 强制改变时间戳 ms
-			mAudioSinker->put(pkt);
+			mADecoder->put(pkt);
 
 		} else if (pkt->packet()->stream_index == mVstream ) {
 			/*
@@ -422,17 +459,17 @@ void LocalFileDemuxer::loop()
 			 * video dts = -1502 , pts=0.000000,dts=-0.016689,duration 0.016678
 			 * video dts = 0 , pts=0.016689,dts=0.000000,duration 0.016678
 			 * */
-			ALOGD("video dts = %ld , pts=%f,dts=%f,duration %f" ,
+			TLOGD("video dts = %ld , pts=%f,dts=%f,duration %f" ,
 				  pkt->packet()->dts ,
 				  pkt->packet()->pts * video_timebase ,
 				  pkt->packet()->dts * video_timebase ,
 				  pkt->packet()->duration* video_timebase );
 			//pkt->dts = pkt->dts * video_timebase * 1000 ;
 			//pkt->pts  = pkt->pts * video_timebase * 1000  ; // 强制改变时间戳 ms
-			mVideoSinker->put(pkt);
+			mVDecoder->put(pkt);
 
 		} else {
-			ALOGD("discard avpacket");
+			TLOGD("discard avpacket what stream ? %d " , pkt->packet()->stream_index );
 		}
 		pkt = NULL;
 		//usleep(10*1000);
@@ -441,16 +478,13 @@ void LocalFileDemuxer::loop()
 }
 
 
-void* LocalFileDemuxer::extractThread( void* arg)
+void* LocalFileDemuxer::sExtractThread(void *arg)
 {
-
 	prctl(PR_SET_NAME,"LocalFileDemuxer");
 	LocalFileDemuxer* player = (LocalFileDemuxer *) arg;
-	//JNI_ATTACH_JVM_WITH_NAME( );
-	ALOGD("Extractor Thread Enter");
+	LOGD(s_logger,"Extractor Thread Enter");
 	player->loop();
-	ALOGD("Extractor Thread Exit");
-	//JNI_DETACH_JVM( )
+	LOGD(s_logger,"Extractor Thread Exit");
 	return NULL;
 }
 
