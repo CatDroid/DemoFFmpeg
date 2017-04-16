@@ -46,8 +46,17 @@ bool AACSWDecoder::init(const AVCodecParameters *para, double timebase) {
 	const char* codec_name =  acodec->name;
 	int codec_cap = acodec->capabilities;
 	TLOGD("音频流编码器 %s[%d] 编码能力 0x%x" , codec_name , codec_id , codec_cap);
+	//  dump编码器能力 h264 0x3022 AAC  0x402
+	if( codec_cap & AV_CODEC_CAP_SLICE_THREADS ) TLOGT("supports frame-level multithreading.");
+	if( codec_cap & AV_CODEC_CAP_FRAME_THREADS) TLOGT("supports slice-based (or partition-based) multithreading.");
+	if( codec_cap & AV_CODEC_CAP_DELAY)TLOGT("The decoder has a non-zero delay and needs to be fed with avpkt->data=NULL,\n"
+					  "* avpkt->size=0 at the end to get the delayed data until the decoder no longer\n"
+					  "* returns frames.");
+	if( codec_cap & AV_CODEC_CAP_DR1)TLOGT("AV_CODEC_CAP_DR1 ");
 
+	if( codec_cap & AV_CODEC_CAP_CHANNEL_CONF )TLOGT("Codec should fill in channel configuration and samplerate instead of container");
 
+	// 临时修改线程名字  因为ffmpeg内部会启动线程
 	char oldName[256]; memset(oldName,0,sizeof(oldName));
 	prctl(PR_GET_NAME, oldName); // 名字的长度最大为15字节，且应该以'\0'结尾
 
@@ -140,7 +149,9 @@ bool AACSWDecoder::init(const AVCodecParameters *para, double timebase) {
 void AACSWDecoder::enqloop(){
 
 	int ret = 0 ;
-	while(! mStop ){
+	bool end = false ;
+
+	while( ! mStop && ! end  ){
 		sp<MyPacket> mypkt = NULL ;
 		AVPacket* packet = NULL;
 
@@ -158,20 +169,8 @@ void AACSWDecoder::enqloop(){
 		}
 
 		if( mypkt.get() == NULL){
-			TLOGW("End Of file, send Empty Packet to Decoder");
-			{
-				AutoMutex _l(mSndRcvMux);
-				ret = avcodec_send_packet(mpAudCtx,NULL);
-				if(ret == 0 ){
-					TLOGW("send Empty Packet Done");
-				}else if(ret == AVERROR(EAGAIN) ){
-					 //
-				}else {
-					TLOGE("avcodec_send_packet ERROR %d ", ret );
-				}
-			}
-			TLOGW("End Of file, break Loop");
-			break;
+			TLOGW("End Of file, mark end");
+			end = true ;
 		}else{
 			packet = mypkt->packet();
 		}
@@ -183,11 +182,19 @@ void AACSWDecoder::enqloop(){
 		// if( got_frame > 0 ) {
 		{
 			AutoMutex _l(mSndRcvMux);
-			ret = avcodec_send_packet(mpAudCtx,packet);
+			if(end){
+				TLOGW("End Of file, try send Empty Packet to Decoder");
+				ret = avcodec_send_packet(mpAudCtx,NULL);
+			}else{
+				ret = avcodec_send_packet(mpAudCtx,packet);
+			}
 		}
 		switch(ret){
-			case 0 :{
-				// success avcodec_send_packet
+			case 0 :{// success avcodec_send_packet
+				if(end){
+					TLOGW("End Of file, send Empty Packet to Decoder done");
+					break;
+				}
 				TLOGD(">[dts %ld pts %ld] %02x %02x %02x %02x %02x" ,
 					  packet->dts,  packet->pts,
 					  (packet->data)?packet->data[0]:0xFF,
@@ -207,8 +214,11 @@ void AACSWDecoder::enqloop(){
 				if(!mStop) goto TRY_AGAIN ;
 			}break;
 			case AVERROR_EOF:{
-				TLOGT("enqloop 解码器完全清空(flushed).\n");
-			}break; // TODO return
+				TLOGW("enqloop 解码器完全清空(flushed).\n");
+				if(end){
+					TLOGW("End Of file, send Empty Packet to Decoder done");
+				}
+			}break;
 			case AVERROR(EINVAL):{
 				TLOGE("enqloop 参数错误\n");
 				// TODO 给Player发送错误事件  Player切换到错误状态 并且反馈给应用层
@@ -230,8 +240,9 @@ void AACSWDecoder::deqloop(){
 
 	AVFrame *pFrame = av_frame_alloc();
 	int ret = 0 ;
+	bool end = false ;
 
-	while(!mStop) {
+	while( !mStop & !end ) {
 		{
 			AutoMutex _l(mSndRcvMux);
 			ret = avcodec_receive_frame(mpAudCtx, pFrame); // non-block
@@ -345,10 +356,11 @@ void AACSWDecoder::deqloop(){
 			}break;
 			case AVERROR_EOF:{
 				// TODO 告诉Player文件已经解码完毕 可能等待渲染结束
-				TLOGT("deqloop 解码器完全清空, 没有更多帧输出.\n");
+				TLOGW("deqloop 解码器完全清空, 没有更多帧输出.\n");
 				// TODO 告诉渲染线程文件已经结束
 				// mRender->renderAudio(NULL) ;
-			}break; // TODO return
+				end = true ;
+			}break;
 			case AVERROR(EAGAIN):{
 				// TODO 目前只是休眠
 				TLOGW("deqloop 解码器暂时无输出\n");
@@ -369,7 +381,7 @@ void AACSWDecoder::deqloop(){
 
 void* AACSWDecoder::enqThreadEntry(void *arg)
 {
-	prctl(PR_SET_NAME,"AACSWDecoder");
+	prctl(PR_SET_NAME,"AACEnqTh");
 	AACSWDecoder* decoder = (AACSWDecoder*)arg;
 	decoder->enqloop();
 
@@ -378,7 +390,7 @@ void* AACSWDecoder::enqThreadEntry(void *arg)
 
 
 void* AACSWDecoder::deqThreadEntry(void *arg) {
-	prctl(PR_SET_NAME,"H264DeqTh");
+	prctl(PR_SET_NAME,"AACDeqTh");
 	AACSWDecoder* decoder = (AACSWDecoder*)arg;
 	decoder->deqloop();
 	return NULL;
@@ -403,9 +415,28 @@ void AACSWDecoder::start(  )
 void AACSWDecoder::stop()
 {
 	mStop = true ;
+	if(mEnqThID != -1) {
+		{
+			AutoMutex l(mEnqMux);
+			mEnqSrcCnd->signal();
+			mEnqSikCnd->signal();
+		}
+		pthread_join(mEnqThID, NULL);
+		clearupPacketQueue();
+		TLOGD("AACSWDecoder EnqTh stop done");
+	}else{
+		TLOGD("Decode EnqTh not start yet ");
+	}
+
+	if(mDeqThID != -1) {
+		// 注意  dequeue线程可能挂在render队列上 所以要先stop Render
+		pthread_join(mDeqThID, NULL);
+		TLOGD("AACSWDecoder DeqTh stop done");
+	}else{
+		TLOGD("Decode DeqTh not start yet ");
+	}
+	TLOGW("AACSWDecoder stop done");
 }
-
-
 
 
 bool AACSWDecoder::put(sp<MyPacket> packet , bool wait ){
@@ -442,27 +473,6 @@ void AACSWDecoder::clearupPacketQueue()
 
 
 AACSWDecoder::~AACSWDecoder(){
-	if(mEnqThID != -1) {
-		{
-			AutoMutex l(mEnqMux);
-			mEnqSrcCnd->signal();
-			mEnqSikCnd->signal();
-		}
-		pthread_join(mEnqThID, NULL);
-		clearupPacketQueue();
-		TLOGD("AACSWDecoder stop done");
-	}else{
-		TLOGD("Decode Thread not start yet ");
-	}
-
-	if(mDeqThID != -1) {
-		// TODO  dequeue线程可能挂在render队列上
-		pthread_join(mDeqThID, NULL);
-		TLOGD("AACSWDecoder stop done");
-	}else{
-		TLOGD("Decode Thread not start yet ");
-	}
-
 
 	if(mEnqMux!=NULL) 	 { delete mEnqMux;		mEnqMux = NULL ;}
 	if(mEnqSrcCnd!=NULL) { delete mEnqSrcCnd;	mEnqSrcCnd = NULL; }

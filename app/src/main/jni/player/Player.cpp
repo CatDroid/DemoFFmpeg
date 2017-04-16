@@ -3,6 +3,7 @@
 //
 
 
+#include <pthread.h>
 #include "Player.h"
 
 #define LOG_TAG "Player"
@@ -20,11 +21,12 @@ CLASS_LOG_IMPLEMENT(Player,"Player");
 
 extern JNIDragonPlayer gJNIDragonPlayer ;
 
-Player::Player(jobject jWeakRef):mjObjWeakRef(jWeakRef),
+Player::Player(JNIEnv* env , jobject jWeakRef):mjObjWeakRef(NULL),
                  mDeMuxer(NULL),mVDecoder(NULL),mADecoder(NULL),mRender(NULL),
         mState(STATE::UNINIT),mStop(false),
         mCmdMutex(NULL),mCmdCond(NULL),
         mSeekToMs(-1){
+    mjObjWeakRef = env->NewGlobalRef(jWeakRef);
     mCmdMutex = new Mutex();
     mCmdCond = new Condition();
     int ret = pthread_create(&mThreadID, NULL, sStateMachineTh , this);
@@ -39,7 +41,7 @@ bool Player::setDataSource(std::string uri)
 {
     if( mState == UNINIT || mState == INITED){ // 允许重复设置路径
         mPlayURI = uri ;
-        mState = INITED;
+        setState(INITED);
     }else{
         return false ;
     }
@@ -75,7 +77,9 @@ bool Player::play() {
 bool Player::pause() {
     if(mState == PLAYING || mState == PAUSED){
         sendEvent(EVENT::CMD_PAUSE);
+        return true ;
     }
+    TLOGE("pause state %s ", stateId2Str(mState));
     return false ;
 }
 
@@ -84,13 +88,18 @@ bool Player::seekTo(int32_t ms) {
         mSeekToMs = ms ;
         sendEvent(CMD_SEEK);
     }else{
+        TLOGE("seekTo state %s ", stateId2Str(mState));
         return false ;
     }
     return true ;
 }
 
 void Player::stop() {
-
+    if(mState == PLAYING || mState == PAUSED){
+        sendEvent(CMD_STOP);
+    }else{
+        TLOGE("stop state %s ", stateId2Str(mState));
+    }
 }
 
 // 内部接口
@@ -100,7 +109,19 @@ void Player::prepare_result() { // 来自Demuxer
 
 Player::~Player()
 {
-    // 线程退出
+    {
+        AutoMutex _l(mCmdMutex);
+        mCmdCond->signal();
+    }
+
+    TLOGD("Player pthread_join enter ");
+    pthread_join(mThreadID, NULL);
+    TLOGD("Player pthread_join join");
+
+
+    delete mCmdMutex; mCmdMutex = NULL ;
+    delete mCmdCond ; mCmdCond = NULL;
+    TLOGD("~Player");
 }
 
 void* Player::sStateMachineTh(void* ctx )
@@ -120,12 +141,14 @@ void Player::loop(void* ctx  )
 
     bool pass = false ;
 
+    TLOGD("loop enter");
     while(!mStop) {
 
         EVENT cmd = EVENT::CMD_UNDEFINE ;
         {
             AutoMutex _l(mCmdMutex);
             if( mCmdQueue.empty() ){
+                TLOGD("Wait CMD");
                 mCmdCond->wait(mCmdMutex);
                 continue ;
             }else{
@@ -139,14 +162,12 @@ void Player::loop(void* ctx  )
         pass = false ;
 
         switch(mState){
-            case STATE::UNINIT:
-                break;
-            case STATE::INITED:
-                break;
-            case STATE::PREPARING:
-
+            case STATE::UNINIT:{
+            }break;
+            case STATE::INITED:{
+            }break;
+            case STATE::PREPARING:{
                 if(cmd == EVENT::CMD_PREPARE) {
-
                     TLOGW("prepare %s ", mPlayURI.c_str());
                     std::size_t pos = mPlayURI.find("://");
                     if (pos == std::string::npos || mPlayURI.size() <= 7) {
@@ -156,7 +177,6 @@ void Player::loop(void* ctx  )
                         notify(jenv,MEDIA_ERR_PREPARE);
                         continue;
                     }
-
                     if( mPlayURI.compare(0,4,"file") == 0 ){
                         mDeMuxer = new LocalFileDemuxer(this);
                         mDeMuxer->setDataSource(mPlayURI);
@@ -196,30 +216,54 @@ void Player::loop(void* ctx  )
                         notify(jenv,MEDIA_ERR_PREPARE);
                     }
                 }
-
-
-                break;
-            case STATE::PREPARED:
+            }break;
+            case STATE::PREPARED:{
                 if(cmd == EVENT::CMD_PLAY){
 
                     mRender = new RenderThread();
+#define TEST_AUDIO_ONLY
+
+#ifndef TEST_VIDEO_ONLY
                     if(mADecoder != NULL){
                         mADecoder->setRender(mRender);
                         mADecoder->start();
                         mDeMuxer->setAudioDecoder(mADecoder);
                     }
+#endif
+#ifndef TEST_AUDIO_ONLY
                     if(mVDecoder != NULL){
                         mVDecoder->start();
                         mVDecoder->setRender(mRender);
                         mDeMuxer->setVideoDecoder(mVDecoder);
                     }
+#endif
                     mDeMuxer->play();
+
+                    /*
+                     * 避免 ffmpeg 内部创建的线程 也继承
+                     * 避免 其他线程占用cpu导致 事件线程无法响应
+                     */
+                    //int n = nice(-10);
+                    //TLOGW("change to nice %d " , n);
+
+                    pthread_attr_t attr ; memset(&attr,0,sizeof(pthread_attr_t));
+                    int policy = 0  ;
+                    pthread_attr_getschedpolicy(&attr, &policy);
+                    if( policy  == SCHED_OTHER){
+                        TLOGW("sched %s priority %d ", "SCHED_OTHER" ,attr.__sched_priority );
+                    }else if (policy == SCHED_RR ){
+                        TLOGW("sched %s priority %d ", "SCHED_RR" ,attr.__sched_priority );
+                    }else if (policy == SCHED_FIFO ){
+                        TLOGW("sched %s priority %d ", "SCHED_FIFO" ,attr.__sched_priority );
+                    }else {
+                        TLOGW("sched %s %d priority %d ", "unkown" , policy , attr.__sched_priority );
+                    }
 
                     setState(STATE::PLAYING);
                 }
 
-                break;
-            case STATE::PLAYING:
+            }break;
+            case STATE::PLAYING:{
 
                 if(cmd == EVENT::CMD_PAUSE){
                     // TODO
@@ -232,21 +276,57 @@ void Player::loop(void* ctx  )
                 }else if(cmd == EVENT::CMD_PLAY_COMPLETE){
 
                 }else if(cmd == EVENT::CMD_STOP){
+                    setState(STATE::STOPPING);
+                    // 调用顺序 应该是 Render --> Decorder --> DeMuxer 因为后者可能挂在前者的缓冲队列上
+                    if(mRender != NULL ){
+                        TLOGW("call Render stop");
+                        mRender->stop();
+                    }
+                    if(mADecoder != NULL){
+                        TLOGW("call ADecorder stop");
+                        mADecoder->stop();
+                    }
+                    if(mVDecoder != NULL){
+                        TLOGW("call VDecorder stop");
+                        mVDecoder->stop();
+                    }
+                    if(mDeMuxer != NULL){
+                        TLOGW("call DeMuxer stop");
+                        mDeMuxer->stop();
+                    }
 
+                    // TODO 支持stop之后重新play的话 这里只需要析构Decoder和Render 保留Demuxer
+                    delete mRender  ;   mRender = NULL;
+                    delete mADecoder;   mADecoder = NULL;
+                    delete mVDecoder;   mVDecoder = NULL;
+                    delete mDeMuxer ;   mDeMuxer = NULL;
+
+                    setState(STATE::STOPPED);
+
+                    mStop = true ; // 退出线程
                 }
-                break;
-            case STATE::PAUSING:
-                break;
-            case STATE::PAUSED:
-                break;
-            case STATE::STOPPING:
-                break;
-            case STATE::STOPPED:
-                break;
-            case STATE::SEEKING:
-                break;
-            case STATE::ERROR:
-                break;
+            }break;
+            case STATE::PAUSING:{
+                TLOGW("PAUSING status");
+            }break;
+            case STATE::PAUSED:{
+                TLOGW("PAUSED status");
+            }break;
+            case STATE::STOPPING:{
+                TLOGW("STOPPING status");
+            }break;
+            case STATE::STOPPED:{
+                TLOGW("STOPPED status");
+            }break;
+            case STATE::SEEKING: {
+                TLOGW("SEEKING status");
+            }break;
+            case STATE::ERROR:{
+                TLOGW("ERROR status");
+            }break;
+            default:{
+                TLOGW("unknown status");
+            }break;
         }
 
         if(!pass ){
@@ -254,6 +334,10 @@ void Player::loop(void* ctx  )
 
         }
     }
+    TLOGD("loop exit");
+
+    jenv->DeleteGlobalRef(mjObjWeakRef);
+    mjObjWeakRef = NULL;
 
 }
 

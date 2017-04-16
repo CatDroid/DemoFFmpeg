@@ -32,6 +32,9 @@ public:
     virtual void renderAudio(sp<Buffer> buf) = 0;
     virtual void renderVideo(sp<Buffer> buf) = 0;
     virtual void setPreview(void* native_view) { mNWin = native_view; }
+    virtual void start() = 0 ;
+    virtual void stop() = 0 ;
+    virtual void pause() = 0 ;
 };
 
 

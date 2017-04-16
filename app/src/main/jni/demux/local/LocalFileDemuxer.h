@@ -35,7 +35,7 @@ private:
 
 	// 线程相关
 	pthread_t mExtractThID ;
-	bool			mLoop ;
+	bool			mStop ;
 	bool 			mPause;
 	bool			mEof ;
 	bool 			mParseResult ;
@@ -89,15 +89,13 @@ public:
 
 private:
 
-	static void* sExtractThread(void *arg);
+	static void* exThreadEntry(void *arg); // extract
 	bool parseFile(); // 返回false 代表prepare失败了
 	void loop() ;
 
 	//无论是SPS PPS VPS ESDS都带有引导头 00 00 00 01
 	void setupVideoSpec(bool is_pps , bool addLeaderCode , unsigned char *data, int size);
 	void setupAudioSpec(bool addLeaderCode , unsigned char *data, int size);
-
-
 
 private:
 	CLASS_LOG_DECLARE(LocalFileDemuxer);

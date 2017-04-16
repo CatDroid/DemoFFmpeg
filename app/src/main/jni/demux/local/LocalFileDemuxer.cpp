@@ -22,7 +22,7 @@ CLASS_LOG_IMPLEMENT(LocalFileDemuxer,"LocalFileDemuxer");
 
 
 LocalFileDemuxer::LocalFileDemuxer(Player* player):DeMuxer(player),
-			mExtractThID(-1),mLoop(true),mPause(false),mEof(false),mParseResult(false),
+			mExtractThID(-1),mStop(false),mPause(false),mEof(false),mParseResult(false),
 			mAvFmtCtx(NULL),mVstream(-1),mAstream(-1) ,
 			 mVTimebase(-1),mATimebase(-1)
 {
@@ -45,7 +45,8 @@ LocalFileDemuxer::LocalFileDemuxer(Player* player):DeMuxer(player),
 
 void LocalFileDemuxer::prepareAsyn()
 {
-	int ret = ::pthread_create(&mExtractThID, NULL, LocalFileDemuxer::sExtractThread, (void *) this);
+	int ret = ::pthread_create(&mExtractThID, NULL, LocalFileDemuxer::exThreadEntry,
+							   (void *) this);
 	if(ret != 0 ){
 		TLOGE("LocalFileDemuxer pthread_create fail %d %d %s " , ret ,errno , strerror(errno));
 	}
@@ -73,11 +74,11 @@ void LocalFileDemuxer::seekTo(int32_t ms) {
 void LocalFileDemuxer::stop()
 {
 	if( mExtractThID != 0 ){
-		{
+		mStop = true ;
+		{ // 针对暂停状态或者还没有开始过情况
 			AutoMutex _l(mStartMutex);
 			mStartCon->signal();
 		}
-		mLoop = false ;
 		::pthread_join( mExtractThID  , NULL);
 		mExtractThID = 0 ;
 	}
@@ -87,7 +88,7 @@ LocalFileDemuxer::~LocalFileDemuxer()
 {
 	delete mStartMutex  ;
 	delete mStartCon ;
-	TLOGD("LocalFileDemuxer");
+	TLOGD("~LocalFileDemuxer");
 }
 
 const AVCodecParameters* LocalFileDemuxer::getVideoCodecPara()
@@ -409,7 +410,7 @@ void LocalFileDemuxer::loop()
 	}
 
 	for (;;) {
-		if (!mLoop) break;
+		if (mStop) break;
 
 		if( mPause ) {
 			AutoMutex _l(mStartMutex);
@@ -440,8 +441,8 @@ void LocalFileDemuxer::loop()
 				 * 推送特殊包给到解码线程 --> 推送特殊包给显示线程
 				 *
 				 * */
-				mADecoder->put(NULL,true);
-				mVDecoder->put(NULL,true);
+				if(mADecoder != NULL) mADecoder->put(NULL,true);
+				if(mVDecoder != NULL) mVDecoder->put(NULL,true);
 				break;
 			}
 			if (mAvFmtCtx->pb && mAvFmtCtx->pb->error){
@@ -490,7 +491,7 @@ void LocalFileDemuxer::loop()
 }
 
 
-void* LocalFileDemuxer::sExtractThread(void *arg)
+void* LocalFileDemuxer::exThreadEntry(void *arg)
 {
 	prctl(PR_SET_NAME,"LocalFileDemuxer");
 	LocalFileDemuxer* demuxer = (LocalFileDemuxer *) arg;

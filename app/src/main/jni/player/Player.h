@@ -44,7 +44,7 @@ public:
     };
 
 private:
-    jobject mjObjWeakRef ; // move out
+    jobject mjObjWeakRef ; // 在loop中返回时候释放
 
     DeMuxer* mDeMuxer ;
     Decoder* mVDecoder ;
@@ -63,7 +63,7 @@ private:
     int32_t mSeekToMs ;
 
 public:
-    Player(jobject jWeakRef);
+    Player(JNIEnv* env , jobject jWeakRef);
     virtual ~Player();
 
     // 外部调用接口

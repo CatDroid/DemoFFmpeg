@@ -30,11 +30,14 @@ class RenderThread : public Render
 {
 public:
 	RenderThread(  );
-	virtual  ~RenderThread();
-	void renderAudio(sp<Buffer> buf);
-	void renderVideo(sp<Buffer> buf);
+	virtual  ~RenderThread() ;
+	void renderAudio(sp<Buffer> buf) override;
+	void renderVideo(sp<Buffer> buf) override;
 	void loop();
 	static void* renderloop(void* arg);
+	void start() override ;
+	void stop() override ;
+	void pause() override ;
 private:
 
 	SurfaceView* mpView ;
@@ -51,9 +54,9 @@ private:
 	int64_t mStartPts ;
 	std::list<sp<Buffer>> mAudioRenderQueue;
 	std::list<sp<Buffer>> mVideoRenderQueue;
-	Mutex* mQueueMutex ;
-	Condition* mQueueCond ;
-	Condition* mFullCond ;
+	Mutex mQueueMutex ;
+	Condition mQueueCond ;
+	Condition mFullCond ;
 	sp<BufferManager> mBM;
 
 	sp<SaveFile> mDebugFile ;

@@ -62,14 +62,37 @@ bool H264SWDecoder::init(const AVCodecParameters* para , double timebase )
 	codec_cap = vcodec->capabilities; // AV_CODEC_CAP_
 	TLOGD("视频流编码器 %s[%d] 编码能力 0x%x" ,
 		  codec_name , codec_id , codec_cap);
-	//  h264 28  可以通过ffmpeg -decoders查看这个
+	//  h264 28  0x3022 可以通过ffmpeg -decoders查看这个
+
+	//  dump编码器能力 h264 0x3022 AAC  0x402
+	if( codec_cap & AV_CODEC_CAP_SLICE_THREADS ){ // H264
+		TLOGT("supports frame-level multithreading.");
+	}
+	if( codec_cap & AV_CODEC_CAP_FRAME_THREADS){ // H264
+		TLOGT("supports slice-based (or partition-based) multithreading.");
+	}
+//	if( codec_cap & AV_CODEC_CAP_TRUNCATED ){
+//		TLOGT("AV_CODEC_CAP_TRUNCATED");
+//	}
+	if( codec_cap & AV_CODEC_CAP_DELAY){  // H264
+		TLOGT("The decoder has a non-zero delay and needs to be fed with avpkt->data=NULL,\n"
+					  "* avpkt->size=0 at the end to get the delayed data until the decoder no longer\n"
+					  "* returns frames.");
+	}
+	if( codec_cap & AV_CODEC_CAP_DR1){// H264 & AAC
+		TLOGT("AV_CODEC_CAP_DR1 ");
+	}
+	if( codec_cap & AV_CODEC_CAP_CHANNEL_CONF ){ // H265
+		TLOGT("Codec should fill in channel configuration and samplerate instead of container");
+	}
+
 
 	// 如果解码器支持 非完整的帧: 针对两帧的边界不刚好是包的边界(AVPacket)
 	//if (vcodec->capabilities & AV_CODEC_CAP_TRUNCATED)
 	//	mVideoCtx->flags |= AV_CODEC_FLAG_TRUNCATED; // we do not send complete frames  我们可以处理比特流
 	// 设置这个可能会导致avcodec_decode_video2 got_frame不是1的时候 需要先保存数据
 
-
+	// 临时修改线程名字  因为ffmpeg内部会启动线程
 	char oldName[256]; memset(oldName,0,sizeof(oldName));
 	prctl(PR_GET_NAME, oldName); // 名字的长度最大为15字节，且应该以'\0'结尾
 
@@ -211,11 +234,32 @@ void H264SWDecoder::start( ) {
 
 void H264SWDecoder::stop() {
 	mStop = true ;
+	if(mEnqThID != -1) {
+		{
+			AutoMutex l(mEnqMux);
+			mEnqSrcCnd->signal();
+			mEnqSikCnd->signal();
+		}
+		pthread_join(mEnqThID, NULL);
+		clearupPacketQueue();
+		TLOGD("H264SWDecoder EnqTh stop done");
+	}else{
+		TLOGD("Decode EnqTh not start yet ");
+	}
+
+	if(mDeqThID != -1) {
+		// 注意  dequeue线程可能挂在render队列上 所以要先stop Render
+		pthread_join(mDeqThID, NULL);
+		TLOGD("H264SWDecoder DeqTh stop done");
+	}else{
+		TLOGD("Decode DeqTh not start yet ");
+	}
+	TLOGW("H264SWDecoder stop done");
 }
 
 
 bool H264SWDecoder::put(sp<MyPacket> packet , bool wait ){
-	while(!mStop){
+	while(!mStop){// 当stop()之后调用put只会立刻释放MyPacket
 		AutoMutex l(mEnqMux);
 		if( mPktQueue.size() == MAX_PACKET_QUEUE_SIZE ){
 			TLOGW("too much video AVPacket wait!");
@@ -250,7 +294,8 @@ void H264SWDecoder::enqloop(){
 //	};
 
 	int ret = 0 ;
-	while( ! mStop ){
+	bool end = false ; // 如果DeMuxer往队列发送空包 那么表示文件结束
+	while( ! mStop && ! end ){
 
 		sp<MyPacket> mypkt = NULL ; // 析构时 对AVPacket unref并且返回AVPacket给Muxer的PacketManager
 		AVPacket* avpkt = NULL;
@@ -262,11 +307,10 @@ void H264SWDecoder::enqloop(){
 			mPktQueue.pop_front();
 			mEnqSrcCnd->signal();
 		}else{
-			if(mStop)break;
+			if(mStop)break; // 在Mutex保护中 应该先检查状态 再等待wait
 			mEnqSikCnd->wait(mEnqMux);
 			continue;
 		}
-
 
 		if( mypkt.get() == NULL){
 			/*
@@ -280,13 +324,8 @@ void H264SWDecoder::enqloop(){
 			 * avcodec_send_packet 编程:
 			 * 		调用一次发送空包 avcodec_send_packet( codec , NULL);
 			 * */
-			TLOGW("End Of file, send Empty Packet to Decoder");
-			{
-				AutoMutex _l(mSndRcvMux);
-				avcodec_send_packet(mpVidCtx,NULL);
-			}
-			TLOGW("End Of file, break Loop");
-			break;
+			TLOGW("End Of file, mark end");
+			end = true ;
 			//TLOGW("get remaing frame from video decoder ");
 			//avpkt = &endpack; // enter draining mode
 		}else{
@@ -328,11 +367,20 @@ void H264SWDecoder::enqloop(){
 		CostHelper cost ;
 		{
 			AutoMutex _l(mSndRcvMux);
-			ret = avcodec_send_packet(mpVidCtx,avpkt);
+			if(end){
+				TLOGW("End Of file, try send Empty Packet to Decoder");
+				ret = avcodec_send_packet(mpVidCtx,NULL);
+			}else{
+				ret = avcodec_send_packet(mpVidCtx,avpkt);
+			}
+
 		}
 		switch(ret){
-			case 0 :{
-				// success avcodec_send_packet
+			case 0 :{// success avcodec_send_packet
+				if(end){
+					TLOGW("End Of file, send Empty Packet to Decoder done");
+					break;
+				}
 				TLOGT(">[dts %ld pts %ld size %d] %02x %02x %02x %02x %02x" ,
 					  avpkt->dts, avpkt->pts, avpkt->size,// 对于H264来说 包含  用4个字节大端表示的NALU大小 + NALU
 					  avpkt->data?avpkt->data[0]:0xFF, // 从AVFormatContext获取 或者 放到AVCodecContext的H264不包含前引导码00000001/000001
@@ -354,8 +402,16 @@ void H264SWDecoder::enqloop(){
 				if(!mStop) goto TRY_AGAIN ;
 			}break;
 			case AVERROR_EOF:{
-				TLOGT("enqloop 解码器完全清空(flushed).\n");
-			}break; // TODO return
+				TLOGW("enqloop 解码器完全清空(flushed).\n");
+				if(end){
+					/* 注意:
+					 * avcodec_send_packet NULL 只需要发送一次 可能会返回EAGAIN(不是返回0) 但是内部已经设置draining
+					 * 第二次再发送 avcodec_send_packet NULL 就会返回 EOF
+					 * 在这里跳出TRY_AGAIN,返回循环判断end
+					 */
+					TLOGW("End Of file, send Empty Packet to Decoder done");
+				}
+			}break;
 			case AVERROR(EINVAL):{
 				TLOGE("enqloop 参数错误\n");
 				// TODO 给Player发送错误事件  Player切换到错误状态 并且反馈给应用层
@@ -416,8 +472,9 @@ void H264SWDecoder::deqloop(){
 
 	AVFrame* pFrame = av_frame_alloc();
 	int ret = 0 ;
+	bool end = false ;
 
-	while ( !mStop) {
+	while ( !mStop & !end ) {
 		{
 			AutoMutex _l(mSndRcvMux);
 			ret = avcodec_receive_frame(mpVidCtx, pFrame); // non-block
@@ -436,7 +493,7 @@ void H264SWDecoder::deqloop(){
 						" 是否引用计数 %d 可写 %d "
 						" 四个平面 %p[%d] %p[%d] %p[%d] %p[%d]" ,
 					  pFrame->pts==AV_NOPTS_VALUE?-111:pFrame->pts, pFrame->pkt_dts ,  pFrame->pkt_pts,
-					  av_get_colorspace_name(cs), cs,
+					  cs==AVCOL_SPC_UNSPECIFIED?"unspecified":av_get_colorspace_name(cs), cs,
 					  pixelFormat2str(pixfmt) ,pixfmt,
 					  mpVidCtx->refcounted_frames,  av_frame_is_writable(pFrame),
 					  (void*)pFrame->data[0], pFrame->linesize[0],
@@ -502,10 +559,11 @@ void H264SWDecoder::deqloop(){
 			}break;
 			case AVERROR_EOF:{
 				// TODO 告诉Player文件已经解码完毕 可能等待渲染结束
-				TLOGT("deqloop 解码器完全清空, 没有更多帧输出.\n");
+				TLOGW("deqloop 解码器完全清空, 没有更多帧输出.\n");
 				// TODO 告诉渲染线程文件已经结束
 				// mRender->renderVideo(NULL) ;
-			}break; // TODO return
+				end = true ;
+			}break;
 			case AVERROR(EAGAIN):{
 				// TODO 目前只是休眠
 				// 根据:  https://ffmpeg.org/doxygen/3.1/group__lavc__encdec.html
@@ -538,29 +596,6 @@ void* H264SWDecoder::deqThreadEntry(void *arg) {
 
 H264SWDecoder::~H264SWDecoder()
 {
-	if(mEnqThID != -1) {
-		{
-			AutoMutex l(mEnqMux);
-			mEnqSrcCnd->signal();
-			mEnqSikCnd->signal();
-		}
-		pthread_join(mEnqThID, NULL);
-		clearupPacketQueue();
-		TLOGD("H264SWDecoder stop done");
-	}else{
-		TLOGD("Decode Thread not start yet ");
-	}
-
-	if(mDeqThID != -1) {
-		// TODO  dequeue线程可能挂在render队列上
-		pthread_join(mDeqThID, NULL);
-		clearupPacketQueue();
-		TLOGD("H264SWDecoder stop done");
-	}else{
-		TLOGD("Decode Thread not start yet ");
-	}
-
-
 	if(mEnqMux!=NULL) 	 { delete mEnqMux;		mEnqMux = NULL ;}
 	if(mEnqSrcCnd!=NULL) { delete mEnqSrcCnd;	mEnqSrcCnd = NULL; }
 	if(mEnqSikCnd!=NULL) { delete mEnqSikCnd;	mEnqSikCnd = NULL; }
@@ -569,6 +604,5 @@ H264SWDecoder::~H264SWDecoder()
 		avcodec_free_context(&mpVidCtx);
 		mpVidCtx = NULL;
 	}
-
 	TLOGT("~H264SWDecoder");
 }

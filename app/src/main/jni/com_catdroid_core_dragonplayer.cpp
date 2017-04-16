@@ -5,7 +5,7 @@
  *      Author: Hanloong Ho
  */
 
-#define LOG_TAG "jni_mp4player"
+#define LOG_TAG "jni_player"
 
 #include <JClass.h>
 #include "Player.h"
@@ -22,7 +22,7 @@ struct JNIPlayer{
 static long JNICALL native_setup(JNIEnv *env, jobject thiz, jobject player_this_ref )
 {
 	JNIPlayer* jplayer = new JNIPlayer();
-	jplayer->thizPlayer = new Player(env->NewGlobalRef(player_this_ref));
+	jplayer->thizPlayer = new Player(env , player_this_ref);
 	LOGT(LOG_TAG , "native_setup %p" , (void*)jplayer );
 	return (long) jplayer;
 }
@@ -44,14 +44,10 @@ static void JNICALL native_prepareAsync(JNIEnv *env, jobject thiz, jlong ctx)
 	jplayer->thizPlayer->prepare();
 }
 
-static void JNICALL native_free(JNIEnv *env, jobject thiz, jlong ctx )
-{
-
-}
 
 static jboolean JNICALL  native_setDisplay(JNIEnv *env, jobject thiz, jlong player_ctx, jobject jSurface )
 {
-	return true ;
+	return JNI_TRUE ;
 }
 
 static void JNICALL native_play(JNIEnv *env, jobject thiz, jlong ctx )
@@ -62,18 +58,29 @@ static void JNICALL native_play(JNIEnv *env, jobject thiz, jlong ctx )
 }
 static void JNICALL native_pause(JNIEnv *env, jobject thiz, jlong ctx)
 {
-
+	LOGT(LOG_TAG , "native_pause %p" , (void*)ctx );
 }
 
 static void JNICALL native_seekTo(JNIEnv *env, jobject thiz, jlong ctx , jint msec)
 {
-
+	LOGT(LOG_TAG , "native_seekTo %p" , (void*)ctx );
 }
 
 static void JNICALL native_stop(JNIEnv *env, jobject thiz, jlong ctx)
 {
-
+	LOGT(LOG_TAG , "native_stop %p" , (void*)ctx );
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	jplayer->thizPlayer->stop();
 }
+
+static void JNICALL native_free(JNIEnv *env, jobject thiz, jlong ctx )
+{
+	LOGT(LOG_TAG , "native_free %p" , (void*)ctx );
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	delete jplayer->thizPlayer;
+	delete jplayer ;
+}
+
 
 static jboolean JNICALL  native_setVolume(JNIEnv *env, jobject thiz, jlong ctx , jfloat left , jfloat right )
 {

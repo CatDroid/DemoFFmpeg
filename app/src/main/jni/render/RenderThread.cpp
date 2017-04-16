@@ -20,44 +20,10 @@ RenderThread::RenderThread(  ):
 		mStartSys(-1),mStartPts(-1)
 {
 
-
-	mQueueMutex = new Mutex();
-	mQueueCond = new Condition();
-	mFullCond = new Condition();
-
-	int ret = ::pthread_create(&mRenderTh , NULL ,  renderloop , this );
-	if( ret != 0 ){
-		mRenderTh = -1 ;
-		TLOGE("pthread_create ERROR %d %s " , errno ,strerror(errno));
-	}
-
 }
 
 
 
-RenderThread::~RenderThread()
-{
-	mStop = true ;
-	if( mRenderTh != -1 ){
-		{
-			AutoMutex l(mQueueMutex);
-			mQueueCond->signal();
-			mFullCond->signal();
-		}
-		TLOGD("~RenderThread Join ");
-		::pthread_join(mRenderTh , NULL );
-		mRenderTh = -1;
-		delete mQueueMutex; mQueueMutex = NULL;
-		delete mQueueCond; mQueueCond = NULL;
-		delete mFullCond; mFullCond = NULL;
-	}
-	if( mpSwsCtx != 0 ) {
-		sws_freeContext(mpSwsCtx);
-		av_frame_free(&mSrcFrame);
-		av_frame_free(&mDstFrame);
-	}
-	TLOGD("~RenderThread done ");
-}
 
 void RenderThread::renderAudio(sp<Buffer> buf)
 {
@@ -130,11 +96,11 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 		bool empty = mVideoRenderQueue.empty();
 		if(empty){
 			mVideoRenderQueue.push_back(rgbbuf);
-			mQueueCond->signal();
+			mQueueCond.signal();
 		}else{
 			if( mVideoRenderQueue.size() >= VIDEO_RENDER_BUFFER_SIZE ){
 				TLOGW("too much video RenderBuffer wait!");
-				mFullCond->wait(mQueueMutex);
+				mFullCond.wait(mQueueMutex);
 				continue ;
 			}else{
 				mVideoRenderQueue.push_back(rgbbuf);
@@ -165,10 +131,10 @@ void RenderThread::loop()
 				int size = mVideoRenderQueue.size();
 				vbuf = mVideoRenderQueue.front();
 				mVideoRenderQueue.pop_front();
-				if( size >= VIDEO_RENDER_BUFFER_SIZE ) mFullCond->signal();
+				if( size >= VIDEO_RENDER_BUFFER_SIZE ) mFullCond.signal();
 			}else{
 				if( mStop ) break;
-				mQueueCond->wait(mQueueMutex);
+				mQueueCond.wait(mQueueMutex);
 				continue;
 			}
 		}
@@ -201,7 +167,7 @@ void RenderThread::loop()
 
 	}
 
-
+	if(mpTrack == NULL) return ; // TODO
 	while( !mStop && !mpTrack->isStoped() ){
 		TLOGW("video render thread wait for audio render thread mStop = %d isStoped = %d " , mStop , mpTrack->isStoped());
 		usleep(10*1000);
@@ -216,6 +182,45 @@ void* RenderThread::renderloop(void* arg)
 	RenderThread* pthread = (RenderThread*)arg;
 	pthread->loop() ;
 	return NULL;
+}
+
+
+
+void RenderThread::start() {
+	int ret = ::pthread_create(&mRenderTh , NULL ,  renderloop , this );
+	if( ret != 0 ){
+		mRenderTh = -1 ;
+		TLOGE("pthread_create ERROR %d %s " , errno ,strerror(errno));
+	}
+}
+
+void RenderThread::pause() {
+	//TODO 暂停播放
+}
+
+void RenderThread::stop() {
+	mStop = true ;
+	if( mRenderTh != -1 ){
+		{
+			AutoMutex l(mQueueMutex);
+			mQueueCond.signal();
+			mFullCond.signal();
+		}
+		TLOGD("~RenderThread Join ");
+		::pthread_join(mRenderTh , NULL );
+		mRenderTh = -1;
+	}
+}
+
+
+RenderThread::~RenderThread()
+{
+	if( mpSwsCtx != NULL ) {
+		sws_freeContext(mpSwsCtx);
+		av_frame_free(&mSrcFrame);
+		av_frame_free(&mDstFrame);
+	}
+	TLOGD("~RenderThread done ");
 }
 
 
