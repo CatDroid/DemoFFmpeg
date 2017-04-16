@@ -166,7 +166,7 @@ AudioTrack::AudioTrack(uint32_t channel, uint32_t sample_rate) : mStop(false), m
 // this callback handler is called every time a buffer finishes playing
 void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
-	SLresult result;
+//	SLresult result;
 	AudioTrack*  at = (AudioTrack*)context ;
 	at->playerCallback(bq);
 }

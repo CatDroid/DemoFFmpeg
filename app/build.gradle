@@ -9,10 +9,11 @@ android {
 
         externalNativeBuild {
             ndkBuild {
-                cFlags "-D__STDC_CONSTANT_MACROS","-std=c11","-O3"
-                cppFlags "-std=c++11","-Wall","-fno-exceptions","-fno-rtti","-O3"
+                cFlags "-D__STDC_CONSTANT_MACROS","-std=c11","-O3","-Werror","-Wall"
+                cppFlags "-std=c++11","-Wall","-fno-exceptions","-fno-rtti","-O3","-Werror","-Wall"
             }
         }
+
 
         ndk {
             moduleName "demo_ffmpeg"
@@ -25,7 +26,15 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.txt'
+            debuggable true
+            jniDebuggable true
         }
+        debug {
+            // 这样可以undefine NDEBUG,所有可以使用assert
+            debuggable true
+            jniDebuggable true
+        }
+
     }
     // 使用externalNativeBuild来使Gradle连接到CMake或者ndk-build脚本(CMakelist or Android.mk)
     externalNativeBuild {

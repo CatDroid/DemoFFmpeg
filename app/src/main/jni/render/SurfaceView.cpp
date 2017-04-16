@@ -27,7 +27,7 @@ SurfaceView::~SurfaceView()
 
 void SurfaceView::draw(uint8_t* pBuf , uint32_t size , uint32_t width  , uint32_t height )
 {
-	assert(buffer != NULL);
+	assert(pBuf != NULL);
 
 	// 	ANativeWindow_getWidth
 	// 	ANativeWindow_getHeight  // 获取当前window的宽高

@@ -42,6 +42,7 @@ include $(CLEAR_VARS)
 
 # avcodec_decode_audio4 avcodec_decode_video2 is deprecated
 LOCAL_CFLAGS += -Wno-deprecated-declarations
+LOCAL_CFLAGS += -UNDEBUG
 
 LOCAL_MODULE    := demo_ffmpeg
 LOCAL_SRC_FILES += common/ffmpeg_common.cpp \

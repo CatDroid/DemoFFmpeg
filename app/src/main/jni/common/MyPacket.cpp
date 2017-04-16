@@ -44,7 +44,7 @@ void PacketManager::push(MyPacket *pbuf)
         ALOGD("%p free one packet %p [FULL]" , this , pbuf );
         delete pbuf; // 导致析构  MyPacket.mPm 在这里 = NULL 所以不能返回后调用 mPm = NULL ;
     }else{
-        ALOGD("%p put to freePackets %p [before size %d] " ,this , pbuf , mFreePackets.size() );
+        ALOGD("%p put to freePackets %p [before size %lu] " ,this , pbuf , mFreePackets.size() );
         mFreePackets.push_back(pbuf);
         pbuf->mPm = NULL ; //  已经把MyPacket还给 PacketManager  取消对PacketManager的引用
     }

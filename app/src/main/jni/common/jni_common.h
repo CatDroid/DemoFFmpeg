@@ -25,8 +25,8 @@ extern JavaVM *g_JVM;
 			args.version = JNI_VERSION_1_4;  \
 			args.name = thread_name ; \
 			args.group = NULL; \
-			int status = g_JVM->GetEnv((void **)&jenv, JNI_VERSION_1_4); \
-			jint result = g_JVM->AttachCurrentThread(&jni_env, &args);
+			g_JVM->GetEnv((void **)&jenv, JNI_VERSION_1_4); \
+			g_JVM->AttachCurrentThread(&jni_env, &args);
 
 #define JNI_ATTACH_JVM(jni_env) \
 			JNIEnv *jenv;\
