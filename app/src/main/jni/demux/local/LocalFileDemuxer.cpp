@@ -370,22 +370,7 @@ bool LocalFileDemuxer::parseFile() {
 	return true ;
 }
 
-const char* const LocalFileDemuxer::pixelFormat2str(AVPixelFormat pixel ){
-	switch(pixel){
-		case AV_PIX_FMT_YUV420P:
-			return "planar YUV 4:2:0";
-		case AV_PIX_FMT_BGR24:
-			return "packed RGB 8:8:8 BGRBGR...";
-		case AV_PIX_FMT_YUV444P:
-			return "planar YUV 4:4:4";
-		case AV_PIX_FMT_YUYV422:
-			return "packed YUV 4:2:2 Y0 Cb Y1 Cr";
-		case AV_PIX_FMT_YUV422P:
-			return "planar YUV 4:2:2";
-		default:
-			return "unknown";
-	}
-}
+
 void LocalFileDemuxer::loop()
 {
 	sp<MyPacket> pkt = NULL;
@@ -470,7 +455,8 @@ void LocalFileDemuxer::loop()
 		/* check if packet is in play range specified by user, then queue, otherwise discard */
 		stream_start_time = mAvFmtCtx->streams[pkt->packet()->stream_index]->start_time; // 时间单位是 该流的 time base
 
-		if (pkt->packet()->stream_index == mAstream  ) {
+		// while [ 1 ] ; do adb shell ps -t 32058 ; sleep 1 ; done;
+		if (pkt->packet()->stream_index == mAstream  && mADecoder != NULL ) {
 			TLOGD("audio dts = %ld , pts=%f,dts=%f,duration %f" ,
 				  pkt->packet()->dts ,
 				  pkt->packet()->pts * mATimebase ,
@@ -479,7 +465,7 @@ void LocalFileDemuxer::loop()
 			//pkt->pts = pkt->pts * audio_timebase * 1000  ; // 强制改变时间戳 ms
 			mADecoder->put(pkt , true );
 
-		} else if (pkt->packet()->stream_index == mVstream ) {
+		} else if (pkt->packet()->stream_index == mVstream && mVDecoder != NULL) {
 			/*
 			 * 第一帧IDR 65帧 dts是负数 pts是0
 			 * video dts = -1502 , pts=0.000000,dts=-0.016689,duration 0.016678
@@ -507,9 +493,9 @@ void LocalFileDemuxer::loop()
 void* LocalFileDemuxer::sExtractThread(void *arg)
 {
 	prctl(PR_SET_NAME,"LocalFileDemuxer");
-	LocalFileDemuxer* player = (LocalFileDemuxer *) arg;
+	LocalFileDemuxer* demuxer = (LocalFileDemuxer *) arg;
 	LOGD(s_logger,"Extractor Thread Enter");
-	player->loop();
+	demuxer->loop();
 	LOGD(s_logger,"Extractor Thread Exit");
 	return NULL;
 }

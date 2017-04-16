@@ -47,6 +47,14 @@ bool AACSWDecoder::init(const AVCodecParameters *para, double timebase) {
 	int codec_cap = acodec->capabilities;
 	TLOGD("音频流编码器 %s[%d] 编码能力 0x%x" , codec_name , codec_id , codec_cap);
 
+
+	char oldName[256]; memset(oldName,0,sizeof(oldName));
+	prctl(PR_GET_NAME, oldName); // 名字的长度最大为15字节，且应该以'\0'结尾
+
+	char newName[16]; memset(newName, 0, 16);
+	snprintf(newName, 16, "AAC_%p", this); // H264_0x7f9abf30
+	prctl(PR_SET_NAME, newName);
+
 	if((ret = avcodec_open2(mpAudCtx, acodec, NULL)) < 0){
 		TLOGE("call avcodec_open2 return %d", ret);
 		return false;
@@ -124,6 +132,8 @@ bool AACSWDecoder::init(const AVCodecParameters *para, double timebase) {
 	mSaveFile = new SaveFile("/mnt/sdcard/decode.pcm");
 #endif
 
+	prctl(PR_SET_NAME, oldName);
+
 	return true ;
 }
 
@@ -149,7 +159,17 @@ void AACSWDecoder::enqloop(){
 
 		if( mypkt.get() == NULL){
 			TLOGW("End Of file, send Empty Packet to Decoder");
-			avcodec_send_packet(mpAudCtx,NULL);
+			{
+				AutoMutex _l(mSndRcvMux);
+				ret = avcodec_send_packet(mpAudCtx,NULL);
+				if(ret == 0 ){
+					TLOGW("send Empty Packet Done");
+				}else if(ret == AVERROR(EAGAIN) ){
+					 //
+				}else {
+					TLOGE("avcodec_send_packet ERROR %d ", ret );
+				}
+			}
 			TLOGW("End Of file, break Loop");
 			break;
 		}else{
@@ -161,7 +181,10 @@ void AACSWDecoder::enqloop(){
 	TRY_AGAIN:
 		// ret  = avcodec_decode_audio4(mpAudCtx, frame, &got_frame, packet );
 		// if( got_frame > 0 ) {
-		ret = avcodec_send_packet(mpAudCtx,packet);
+		{
+			AutoMutex _l(mSndRcvMux);
+			ret = avcodec_send_packet(mpAudCtx,packet);
+		}
 		switch(ret){
 			case 0 :{
 				// success avcodec_send_packet
@@ -209,7 +232,10 @@ void AACSWDecoder::deqloop(){
 	int ret = 0 ;
 
 	while(!mStop) {
-		ret = avcodec_receive_frame(mpAudCtx , pFrame); // non-block
+		{
+			AutoMutex _l(mSndRcvMux);
+			ret = avcodec_receive_frame(mpAudCtx, pFrame); // non-block
+		}
 		switch (ret) {
 			case 0:{//成功
 				if (pFrame->pts == AV_NOPTS_VALUE) {

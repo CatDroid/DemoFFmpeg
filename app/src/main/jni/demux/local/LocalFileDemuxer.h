@@ -97,7 +97,7 @@ private:
 	void setupVideoSpec(bool is_pps , bool addLeaderCode , unsigned char *data, int size);
 	void setupAudioSpec(bool addLeaderCode , unsigned char *data, int size);
 
-	const char* const pixelFormat2str(AVPixelFormat pixel );
+
 
 private:
 	CLASS_LOG_DECLARE(LocalFileDemuxer);

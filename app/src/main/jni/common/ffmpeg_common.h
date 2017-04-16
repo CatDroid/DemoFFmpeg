@@ -21,5 +21,6 @@ extern "C" {
 }
 void ffmpeg_strerror( int error_num , const char* prefix = NULL);
 
+const char* const pixelFormat2str(AVPixelFormat pixel );
 
 #endif /* FFMPEG_COMMON_H_ */

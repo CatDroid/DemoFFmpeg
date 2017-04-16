@@ -36,6 +36,7 @@ private:
 	Mutex* mEnqMux ;
 	Condition* 	mEnqSikCnd ;
 	Condition* 	mEnqSrcCnd ;
+	Mutex mSndRcvMux ;
 
 	// 线程
 	pthread_t mEnqThID ;

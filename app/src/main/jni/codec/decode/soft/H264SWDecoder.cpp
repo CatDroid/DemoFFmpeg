@@ -70,6 +70,14 @@ bool H264SWDecoder::init(const AVCodecParameters* para , double timebase )
 	// 设置这个可能会导致avcodec_decode_video2 got_frame不是1的时候 需要先保存数据
 
 
+	char oldName[256]; memset(oldName,0,sizeof(oldName));
+	prctl(PR_GET_NAME, oldName); // 名字的长度最大为15字节，且应该以'\0'结尾
+
+	char newName[16]; memset(newName, 0, 16);
+	snprintf(newName, 16, "H264_%p", this); // H264_0x7f9abf30
+	prctl(PR_SET_NAME, newName);
+
+
 	av_dict_set(&opt, "threads", "auto", 0); // add an entry: 线程数 小米5(晓龙820)是4个线程
 	if((ret = avcodec_open2(mpVidCtx, vcodec, &opt )) < 0){
 		TLOGE("call avcodec_open2 return %d", ret);
@@ -101,7 +109,7 @@ bool H264SWDecoder::init(const AVCodecParameters* para , double timebase )
 	TLOGD("AVCodecContext.refcounted_frames = %d"
 				  " flags 0x%x flags2 0x%x" ,
 		  mpVidCtx->refcounted_frames ,
-		  mpVidCtx->flags ,mpVidCtx->flags2);
+		  mpVidCtx->flags ,mpVidCtx->flags2  );
 
 
 	TLOGD("H264视频帧大小 %d 帧率 %f[%d/%d] 时间基准 %f[%d/%d]  ",
@@ -121,7 +129,10 @@ bool H264SWDecoder::init(const AVCodecParameters* para , double timebase )
 	mEnqSikCnd = new Condition();
 	mEnqSrcCnd = new Condition();
 
+
 	just4test();
+
+	prctl(PR_SET_NAME, oldName);
 
 	return true ;
 FAIL:
@@ -270,7 +281,10 @@ void H264SWDecoder::enqloop(){
 			 * 		调用一次发送空包 avcodec_send_packet( codec , NULL);
 			 * */
 			TLOGW("End Of file, send Empty Packet to Decoder");
-			avcodec_send_packet(mpVidCtx,NULL);
+			{
+				AutoMutex _l(mSndRcvMux);
+				avcodec_send_packet(mpVidCtx,NULL);
+			}
 			TLOGW("End Of file, break Loop");
 			break;
 			//TLOGW("get remaing frame from video decoder ");
@@ -308,23 +322,28 @@ void H264SWDecoder::enqloop(){
 		 * 			内部创建AVBufferRef和AVBuffer
 		 * 			但是AVBuffer没有开拓数据空间，而是直接用参数中的*data / size
 		 */
-
 		// ret = avcodec_decode_video2(mpVidCtx, frame, &got_frame, avpkt );
 
 	TRY_AGAIN:
-		ret = avcodec_send_packet(mpVidCtx,avpkt);
+		CostHelper cost ;
+		{
+			AutoMutex _l(mSndRcvMux);
+			ret = avcodec_send_packet(mpVidCtx,avpkt);
+		}
 		switch(ret){
 			case 0 :{
 				// success avcodec_send_packet
-				TLOGT(">[dts %ld pts %ld] %02x %02x %02x %02x %02x" ,
-					  avpkt->dts, avpkt->pts,
+				TLOGT(">[dts %ld pts %ld size %d] %02x %02x %02x %02x %02x" ,
+					  avpkt->dts, avpkt->pts, avpkt->size,// 对于H264来说 包含  用4个字节大端表示的NALU大小 + NALU
 					  avpkt->data?avpkt->data[0]:0xFF, // 从AVFormatContext获取 或者 放到AVCodecContext的H264不包含前引导码00000001/000001
-					  avpkt->data?avpkt->data[1]:0xFF,
+					  avpkt->data?avpkt->data[1]:0xFF, // 但在NALU data[4] 前有 大端表示的NALU大小 data[0-3](不含前面的)
 					  avpkt->data?avpkt->data[2]:0xFF,
 					  avpkt->data?avpkt->data[3]:0xFF,
 					  avpkt->data?avpkt->data[4]:0xFF
 				);
-				TLOGT("enqloop avcodec_send_packet done");
+				TLOGT("thread [ count %d type %d active %d ] " , mpVidCtx->thread_count , mpVidCtx->thread_type , mpVidCtx->active_thread_type);
+				TLOGT("enqloop avcodec_send_packet done %" PRId64 "us" , cost.Get() );
+				TLOGT("receive_frame %p send_packet %p " ,  mpVidCtx->codec->receive_frame , mpVidCtx->codec->send_packet );
 			}break;
 			case AVERROR(EAGAIN) :{
 				// TODO 两个条件变量
@@ -399,27 +418,37 @@ void H264SWDecoder::deqloop(){
 	int ret = 0 ;
 
 	while ( !mStop) {
-		ret = avcodec_receive_frame(mpVidCtx, pFrame); // non-block
+		{
+			AutoMutex _l(mSndRcvMux);
+			ret = avcodec_receive_frame(mpVidCtx, pFrame); // non-block
+		}
 		switch (ret) {
 			case 0:{ //成功
-				if (pFrame->pts == AV_NOPTS_VALUE) {
-					pFrame->pts = av_frame_get_best_effort_timestamp(pFrame);
-				}
+//				if (pFrame->pts == AV_NOPTS_VALUE) {
+//					pFrame->pts = av_frame_get_best_effort_timestamp(pFrame);
+//				}
 
 				AVColorSpace cs = av_frame_get_colorspace(pFrame) ; // 目前看都是 AVCOL_SPC_UNSPECIFIED 2
 				AVPixelFormat pixfmt = mpVidCtx->pix_fmt ; // 这个参数重要
 
-				TLOGD("<[pts %" PRId64 " pkt_dts %" PRId64 " pkt_pts %" PRId64 "]"
-						" 颜色空间 %d  像素格式 %d "
+				TLOGT("<[pts %" PRId64 " pkt_dts %" PRId64 " pkt_pts %" PRId64 "]"
+						" 颜色空间 %s(%d)  像素格式 %s(%d) "
 						" 是否引用计数 %d 可写 %d "
 						" 四个平面 %p[%d] %p[%d] %p[%d] %p[%d]" ,
-					  pFrame->pts, pFrame->pkt_dts ,  pFrame->pkt_pts,
-					  cs, pixfmt,
+					  pFrame->pts==AV_NOPTS_VALUE?-111:pFrame->pts, pFrame->pkt_dts ,  pFrame->pkt_pts,
+					  av_get_colorspace_name(cs), cs,
+					  pixelFormat2str(pixfmt) ,pixfmt,
 					  mpVidCtx->refcounted_frames,  av_frame_is_writable(pFrame),
 					  (void*)pFrame->data[0], pFrame->linesize[0],
 					  (void*)pFrame->data[1], pFrame->linesize[1],
 					  (void*)pFrame->data[2], pFrame->linesize[2],
 					  (void*)pFrame->data[3], pFrame->linesize[3]
+
+					  /*
+					   * 即使含有B帧 出来的顺序已经按pts的顺序重排列好了
+					   * [pts -111 pkt_dts 14569055 pkt_pts 14569055]
+					   * pts 经常是 AV_NOPTS_VALUE 所以目前用pkt_pts作为时间戳播放
+					   * */
 				);
 				// mVideoCtx->pix_fmt 的可能是
 				//  Codec PixelFormat 0 AV_PIX_FMT_YUV420P
@@ -427,7 +456,7 @@ void H264SWDecoder::deqloop(){
 				// 有些mp4文件是yuv444(ubuntu屏幕录制) yuv422（ubuntu摄像头)
 
 				//TLOGD("video pts decode %ld " , frame->pts );
-				sp<Buffer> buf = mBufMgr->pop();
+//				sp<Buffer> buf = mBufMgr->pop();
 				/**
 				 * 注意:linesize @ AVFrame
 				 * 		For video, 各个平面中的行的大小
@@ -444,14 +473,14 @@ void H264SWDecoder::deqloop(){
 				 *
 				 * 	TODO 如果渲染sharder支持YUV三个平面作为sharder的话 可以不用在这里合并成一片内存
 				 */
-				av_image_copy_to_buffer(buf->data(),
-										mDecodedFrameSize ,
-										(const uint8_t *const *) pFrame->data,
-										pFrame->linesize ,
-										mpVidCtx->pix_fmt ,
-										mpVidCtx->width ,
-										mpVidCtx->height ,
-										1);// AVPicture ---> AVFrame
+//				av_image_copy_to_buffer(buf->data(),
+//										mDecodedFrameSize ,
+//										(const uint8_t *const *) pFrame->data,
+//										pFrame->linesize ,
+//										mpVidCtx->pix_fmt ,
+//										mpVidCtx->width ,
+//										mpVidCtx->height ,
+//										1);// AVPicture ---> AVFrame
 
 //				保存到文件
 //				static WriteFile* testfile = NULL;
@@ -462,11 +491,11 @@ void H264SWDecoder::deqloop(){
 //					TLOGD("write testfile ok");
 //				}
 
-				buf->pts() = (int64_t) (pFrame->pts * mTimeBase * 1000);  // ms
-				buf->height() = mpVidCtx->height ;
-				buf->width() = mpVidCtx->width ;
-				buf->size() = mDecodedFrameSize ;
-				buf->fmt() = mpVidCtx->pix_fmt;
+//				buf->pts() = (int64_t) (pFrame->pts * mTimeBase * 1000);  // ms
+//				buf->height() = mpVidCtx->height ;
+//				buf->width() = mpVidCtx->width ;
+//				buf->size() = mDecodedFrameSize ;
+//				buf->fmt() = mpVidCtx->pix_fmt;
 				av_frame_unref(pFrame);
 				// TODO 给到渲染线程
 				//mRender->renderVideo()

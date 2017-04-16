@@ -45,6 +45,7 @@ private:
 	Mutex* mEnqMux ;
 	Condition* mEnqSikCnd ;
 	Condition* mEnqSrcCnd ;
+	Mutex mSndRcvMux ;
 
 	// 线程
 	bool mStop ;
