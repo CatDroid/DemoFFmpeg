@@ -7,7 +7,7 @@
 
 #include "LocalFileDemuxer.h"
 
-#include "jni_common.h"
+
 #include "ffmpeg_common.h"
 #include "project_utils.h"
 #include "Decoder.h"
@@ -17,10 +17,15 @@
 
 CLASS_LOG_IMPLEMENT(LocalFileDemuxer,"LocalFileDemuxer");
 
-LocalFileDemuxer::LocalFileDemuxer(Player* player):
-				 DeMuxer(player),
-				 mAvFmtCtx(NULL),mExtractThID(-1),mVstream(-1),mAstream(-1),
-				 mLoop(true),mPause(false),mEof(false),mParseResult(false) {
+
+
+
+
+LocalFileDemuxer::LocalFileDemuxer(Player* player):DeMuxer(player),
+			mExtractThID(-1),mLoop(true),mPause(false),mEof(false),mParseResult(false),
+			mAvFmtCtx(NULL),mVstream(-1),mAstream(-1) ,
+			 mVTimebase(-1),mATimebase(-1)
+{
 	mPm = new PacketManager( 20 );
 
 	mStartMutex = new Mutex();
@@ -209,51 +214,56 @@ bool LocalFileDemuxer::parseFile() {
 		AVStream* pStream = mAvFmtCtx->streams[mVstream];
 		AVPixelFormat sample_fmt = (AVPixelFormat)para->format; // for video is AVPixelFormat
 
+		/*
+		 * time_base.num是分子
+		 * time_base.den是分母
+		 * av_q2d 就是 把 num/den
+		 */
 		AVRational radional =  av_guess_frame_rate(mAvFmtCtx, mAvFmtCtx->streams[mVstream], NULL);
 		double fps = av_q2d(radional);
 		mVTimebase = av_q2d(pStream->time_base); // 1 / 90,000
 
 
-		TLOGD("文件时长 %d us  %d ms "  ,
+		TLOGD("文件时长 %" PRId64 " us  %" PRId64 " ms "  ,
 			  mAvFmtCtx->duration ,
 			  mAvFmtCtx->duration/1000 );
 
 		TLOGD("视频流(%d,%d):\n"
-					  "比特率=%lld\n"
+					  "比特率=%" PRId64 "\n"
 					  "帧率=%.2f\n"
 					  "像素格式 %d (可能是 %s )\n"
 					  "时间基准 %d/%d\n"
-					  "该流总帧数 %lld\n"
-					  "时长 %lld(in in stream time base %f)\n"
+					  "该流总帧数 %" PRId64 "\n"
+					  "时长 %" PRId64 "(in in stream time base %f)\n"
 					  "时长 %.4f(second )\n",
 			  para->width,
 			  para->height,
 			  para->bit_rate,
 			  fps,
-			  sample_fmt, (sample_fmt==AV_PIX_FMT_YUV420P?"yuv420":"unknown") ,// 注意:有些片源是YUV422 YUV444等,可能在某些播放器无法播放
+			  sample_fmt, pixelFormat2str(sample_fmt) ,// 注意:有些片源是YUV422 YUV444等,可能在某些播放器无法播放
 			  pStream->time_base.num, pStream->time_base.den,
-			  pStream->nb_frames, 	pStream->duration,
-			  mVTimebase,
+			  pStream->nb_frames,
+			  pStream->duration,  mVTimebase,
 			  pStream->duration * mVTimebase );
 
 		uint8_t *src = para->extradata + 5;
 		int extradata_size = para->extradata_size ;
 		TLOGD("video extradata_size = %d ", extradata_size );
-		DUMP_BUFFER_IN_HEX("video csd:",para->extradata, para->extradata_size);
+		DUMP_BUFFER_IN_HEX("video csd:",para->extradata, para->extradata_size,"LocalFileDemuxer");
 
 		{//sps
 			src += 1;
 			int len = ntohs(*(uint16_t*)src);
 			src += 2;
 			setupVideoSpec(false, true, src, len); src += len;
-			DUMP_BUFFER_IN_HEX("sps:",(uint8_t*)mSPS.c_str(),mSPS.size());
+			DUMP_BUFFER_IN_HEX("sps:",(uint8_t*)mSPS.c_str(),mSPS.size(),"LocalFileDemuxer");
 		}
 		{//pps
 			src += 1;
 			int len = ntohs(*(uint16_t*)src);
 			src += 2;
 			setupVideoSpec(true, true , src, len);
-			DUMP_BUFFER_IN_HEX("pps:",(uint8_t*)mPPS.c_str(),mPPS.size());
+			DUMP_BUFFER_IN_HEX("pps:",(uint8_t*)mPPS.c_str(),mPPS.size(),"LocalFileDemuxer");
 		}
 	}
 	if( mAstream != -1 )
@@ -271,7 +281,6 @@ bool LocalFileDemuxer::parseFile() {
 		AVStream* pStream = mAvFmtCtx->streams[mAstream];
 		mATimebase = av_q2d(pStream->time_base);
 
-		AVSampleFormat sample_fmt = (AVSampleFormat)para->format; // for audio is AVSampleFormat
 
 		char  layout_string[32];
 		av_get_channel_layout_string( layout_string,sizeof(layout_string),para->channels,para->channel_layout);
@@ -314,32 +323,31 @@ bool LocalFileDemuxer::parseFile() {
 		TLOGD("音频流:\ncodecid=%d(see AVCodecID)\n"
 					  "帧大小 %d(样本数/每通道)\n"
 					  "帧时长 %d ms \n"
-					  "帧大小 %d(字节/所有通道)\n"
+					  "帧大小 %d(字节/所有通道 当前format是%s 每样本字节数 %d)\n"
 					  "PCM格式 %d(%s %s see AVSampleFormat)\n"
 					  "通道数 %d\n"
-					  "通道存储顺序 %s/%d ( %s %d , %s %d see channel_layout.h)\n"
+					  "通道存储顺序 %s/%" PRIu64 " ( %s %d , %s %d see channel_layout.h)\n"
 					  "采样率 %d\n"
 					  "每样本大小 %d字节\n"
 					  "每样本大小 %dbits\n"
 					  "时间基准 %d/%d\n"
-					  "总帧数 %lld\n"
-					  "时长 %lld(单位为时间基准 %f)\n"
+					  "总帧数 %" PRId64 "\n"
+					  "时长 %" PRId64 "(单位为时间基准 %f)\n"
 					  "时长 %.4f(秒 )\n"
 					  "时长 %.4f(秒 根据帧数和帧时长计算)\n",
 			  para->codec_id ,
 			  para->frame_size,
 			  para->frame_size * 1000 / para->sample_rate ,
-			  para->frame_size * para->channels * av_get_bytes_per_sample((AVSampleFormat)para->format),
+			  para->frame_size * para->channels * av_get_bytes_per_sample((AVSampleFormat)para->format), av_get_sample_fmt_name((AVSampleFormat)para->format),av_get_bytes_per_sample((AVSampleFormat)para->format),
 			  (AVSampleFormat)para->format, // AV_SAMPLE_FMT_FLTP,  < float, planar 16bit不是AV_SAMPLE_FMT_S16
 			  av_get_sample_fmt_name((AVSampleFormat)para->format),
 			  av_sample_fmt_is_planar((AVSampleFormat)para->format)?"平面(plannar)":"非平面(packed)",
 			  para->channels,
-			  layout_string,
-			  para->channel_layout,
+			  layout_string, para->channel_layout,
 			  av_get_channel_name(AV_CH_FRONT_LEFT), av_get_channel_layout_channel_index(AV_CH_LAYOUT_STEREO,AV_CH_FRONT_LEFT),
 			  av_get_channel_name(AV_CH_FRONT_RIGHT), av_get_channel_layout_channel_index(AV_CH_LAYOUT_STEREO,AV_CH_FRONT_RIGHT),
 			  para->sample_rate,
-			  av_get_bytes_per_sample((AVSampleFormat)para->format),
+			  av_get_bytes_per_sample((AVSampleFormat)para->format),// for audio is AVSampleFormat
 			  para->bits_per_raw_sample ,
 			  pStream->time_base.num, pStream->time_base.den,
 			  pStream->nb_frames, 	pStream->duration,
@@ -351,10 +359,10 @@ bool LocalFileDemuxer::parseFile() {
 		uint8_t *src = para->extradata ;
 		int extradata_size = para->extradata_size ;
 		TLOGD("audio extradata_size = %d ", extradata_size );
-		DUMP_BUFFER_IN_HEX("audio csd:" ,para->extradata, para->extradata_size);
+		DUMP_BUFFER_IN_HEX("audio csd:" ,para->extradata, para->extradata_size,"LocalFileDemuxer");
 
 		setupAudioSpec( true , src, extradata_size);
-		DUMP_BUFFER_IN_HEX("esds:",(uint8_t*)mESDS.c_str(),mESDS.size());
+		DUMP_BUFFER_IN_HEX("esds:",(uint8_t*)mESDS.c_str(),mESDS.size(),"LocalFileDemuxer");
 
 	}
 
@@ -362,36 +370,54 @@ bool LocalFileDemuxer::parseFile() {
 	return true ;
 }
 
+const char* const LocalFileDemuxer::pixelFormat2str(AVPixelFormat pixel ){
+	switch(pixel){
+		case AV_PIX_FMT_YUV420P:
+			return "planar YUV 4:2:0";
+		case AV_PIX_FMT_BGR24:
+			return "packed RGB 8:8:8 BGRBGR...";
+		case AV_PIX_FMT_YUV444P:
+			return "planar YUV 4:4:4";
+		case AV_PIX_FMT_YUYV422:
+			return "packed YUV 4:2:2 Y0 Cb Y1 Cr";
+		case AV_PIX_FMT_YUV422P:
+			return "planar YUV 4:2:2";
+		default:
+			return "unknown";
+	}
+}
 void LocalFileDemuxer::loop()
 {
 	sp<MyPacket> pkt = NULL;
     int64_t stream_start_time;
-    int pkt_in_play_range = 0;
-    int64_t pkt_ts;
-    static int64_t start_time = AV_NOPTS_VALUE;  // 定义开始播放的时间和结束时间
-    int64_t duration = AV_NOPTS_VALUE  ;
+//    int pkt_in_play_range = 0;
+//    int64_t pkt_ts;
+//    static int64_t start_time = AV_NOPTS_VALUE;  // 定义开始播放的时间和结束时间
+//    int64_t duration = AV_NOPTS_VALUE  ;
 
-
-    int64_t video_start_time = mAvFmtCtx->streams[mVstream]->start_time ;
-    int64_t audio_start_time =  mAvFmtCtx->streams[mAstream]->start_time ;
-    double video_timebase = av_q2d(mAvFmtCtx->streams[mVstream]->time_base) ;
-    double audio_timebase = av_q2d(mAvFmtCtx->streams[mAstream]->time_base) ;
-
-    TLOGD("video stream start %lld(time base %f) %f(sec) , ",
-    		video_start_time , video_timebase ,( video_start_time == AV_NOPTS_VALUE ? -1 : video_start_time * video_timebase )
-    		);
-    TLOGD("audio stream start %lld(time base %f)  %f(sec)" ,
-    		audio_start_time , audio_timebase , (audio_start_time == AV_NOPTS_VALUE ? -1 : audio_start_time * audio_timebase )
-    		);
 
 	mParseResult = parseFile();
 	mPlayer->prepare_result();
 	if(! mParseResult ){
-		TLOGE("parseFile error, loop exit");
+		TLOGE("parseFile error, enqloop exit");
 		return ;
 	}else{
+		int64_t video_start_time = mAvFmtCtx->streams[mVstream]->start_time ;
+		int64_t audio_start_time =  mAvFmtCtx->streams[mAstream]->start_time ;
+		double video_timebase = av_q2d(mAvFmtCtx->streams[mVstream]->time_base) ;
+		double audio_timebase = av_q2d(mAvFmtCtx->streams[mAstream]->time_base) ;
+		TLOGD("video stream start %" PRId64 "(time base %f) %f(sec) , ",
+			  video_start_time , video_timebase ,( video_start_time == AV_NOPTS_VALUE ? -1 : video_start_time * video_timebase )
+		);
+		TLOGD("audio stream start %" PRId64 "(time base %f)  %f(sec)" ,
+			  audio_start_time , audio_timebase , (audio_start_time == AV_NOPTS_VALUE ? -1 : audio_start_time * audio_timebase )
+		);
+
 		TLOGW("parseFile success , wait for playing");
+
 	}
+
+
 	{
 		AutoMutex _l(mStartMutex);
 		mStartCon->wait(mStartMutex);
@@ -429,8 +455,8 @@ void LocalFileDemuxer::loop()
 				 * 推送特殊包给到解码线程 --> 推送特殊包给显示线程
 				 *
 				 * */
-				mADecoder->put(NULL);
-				mVDecoder->put(NULL);
+				mADecoder->put(NULL,true);
+				mVDecoder->put(NULL,true);
 				break;
 			}
 			if (mAvFmtCtx->pb && mAvFmtCtx->pb->error){
@@ -447,11 +473,11 @@ void LocalFileDemuxer::loop()
 		if (pkt->packet()->stream_index == mAstream  ) {
 			TLOGD("audio dts = %ld , pts=%f,dts=%f,duration %f" ,
 				  pkt->packet()->dts ,
-				  pkt->packet()->pts * audio_timebase ,
-				  pkt->packet()->dts * audio_timebase ,
-				  pkt->packet()->duration* audio_timebase  );
+				  pkt->packet()->pts * mATimebase ,
+				  pkt->packet()->dts * mATimebase ,
+				  pkt->packet()->duration* mATimebase  );
 			//pkt->pts = pkt->pts * audio_timebase * 1000  ; // 强制改变时间戳 ms
-			mADecoder->put(pkt);
+			mADecoder->put(pkt , true );
 
 		} else if (pkt->packet()->stream_index == mVstream ) {
 			/*
@@ -461,12 +487,12 @@ void LocalFileDemuxer::loop()
 			 * */
 			TLOGD("video dts = %ld , pts=%f,dts=%f,duration %f" ,
 				  pkt->packet()->dts ,
-				  pkt->packet()->pts * video_timebase ,
-				  pkt->packet()->dts * video_timebase ,
-				  pkt->packet()->duration* video_timebase );
+				  pkt->packet()->pts * mVTimebase ,
+				  pkt->packet()->dts * mVTimebase ,
+				  pkt->packet()->duration* mVTimebase );
 			//pkt->dts = pkt->dts * video_timebase * 1000 ;
 			//pkt->pts  = pkt->pts * video_timebase * 1000  ; // 强制改变时间戳 ms
-			mVDecoder->put(pkt);
+			mVDecoder->put(pkt,true);
 
 		} else {
 			TLOGD("discard avpacket what stream ? %d " , pkt->packet()->stream_index );

@@ -24,11 +24,11 @@ protected:
     std::string mUri ;
 
 public:
-    DeMuxer(Player* player):mPlayer(player),mVDecoder(NULL),mADecoder(NULL){ }
+    DeMuxer(Player* player):mPlayer(player),mADecoder(NULL),mVDecoder(NULL){ }
     virtual ~DeMuxer(){ }
 
     // 控制
-    virtual bool setDataSource(std::string path) { mUri = path; }
+    virtual bool setDataSource(std::string path) { mUri = path; return true ; }
     virtual void prepareAsyn() = 0 ; // player.notify();
     virtual void play() = 0 ;
     virtual void pause()= 0 ;

@@ -3,20 +3,25 @@
 //
 
 
-
 #include "Player.h"
 
+#define LOG_TAG "Player"
 #include "jni_common.h"
 
 #include "DeMuxer.h"
 #include "Decoder.h"
 #include "LocalFileDemuxer.h"
 #include "DecoderFactory.h"
+#include "JClass.h"
+#include "JEvent.h"
+#include "RenderThread.h"
 
 CLASS_LOG_IMPLEMENT(Player,"Player");
 
+extern JNIDragonPlayer gJNIDragonPlayer ;
 
-Player::Player():mDeMuxer(NULL),mVDecoder(NULL),mADecoder(NULL),mRender(NULL),
+Player::Player(jobject jWeakRef):mjObjWeakRef(jWeakRef),
+                 mDeMuxer(NULL),mVDecoder(NULL),mADecoder(NULL),mRender(NULL),
         mState(STATE::UNINIT),mStop(false),
         mCmdMutex(NULL),mCmdCond(NULL),
         mSeekToMs(-1){
@@ -34,9 +39,11 @@ bool Player::setDataSource(std::string uri)
 {
     if( mState == UNINIT || mState == INITED){ // 允许重复设置路径
         mPlayURI = uri ;
+        mState = INITED;
     }else{
         return false ;
     }
+    return true ;
 }
 
 bool Player::prepare() {
@@ -44,6 +51,7 @@ bool Player::prepare() {
         setState(PREPARING);
         sendEvent(EVENT::CMD_PREPARE);
     }else{
+        TLOGE("prepare state %s ", stateId2Str(mState));
         return false;
     }
     return true ;
@@ -58,6 +66,7 @@ bool Player::play() {
     if(mState == PREPARED || mState == PAUSED  || mState == PLAYING){
         sendEvent(EVENT::CMD_PLAY);
     }else{
+        TLOGE("play state %s ", stateId2Str(mState));
         return false ;
     }
     return true ;
@@ -77,15 +86,16 @@ bool Player::seekTo(int32_t ms) {
     }else{
         return false ;
     }
+    return true ;
 }
 
 void Player::stop() {
 
 }
 
-void Player::prepare_result() {
-
-
+// 内部接口
+void Player::prepare_result() { // 来自Demuxer
+    sendEvent( EVENT::CMD_PREPARE_RESULT );
 }
 
 Player::~Player()
@@ -96,9 +106,11 @@ Player::~Player()
 void* Player::sStateMachineTh(void* ctx )
 {
     JNIEnv* env ;
+    LOGW(s_logger, "sStateMachineTh Entry ");
     JNI_ATTACH_JVM_WITH_NAME(env,"Player");
     ((Player*)ctx)->loop(env) ;
     JNI_DETACH_JVM(env);
+    LOGW(s_logger, "sStateMachineTh Exit ");
     return NULL;
 }
 
@@ -122,7 +134,8 @@ void Player::loop(void* ctx  )
             }
         }
 
-        if(cmd == EVENT::CMD_UNDEFINE) continue ;
+        TLOGD("Excute CMD %d STATE %s ", cmd , stateId2Str(mState));
+        if( cmd == EVENT::CMD_UNDEFINE) continue ;
         pass = false ;
 
         switch(mState){
@@ -137,10 +150,10 @@ void Player::loop(void* ctx  )
                     TLOGW("prepare %s ", mPlayURI.c_str());
                     std::size_t pos = mPlayURI.find("://");
                     if (pos == std::string::npos || mPlayURI.size() <= 7) {
-                        TLOGE("CMD_PREPARE in PREPARING parse uri error uri:%s size %d ",
+                        TLOGE("CMD_PREPARE in PREPARING parse uri error uri:%s size %lu ",
                               mPlayURI.c_str(),  mPlayURI.size());
                         setState(STATE::ERROR);
-                        // TODO Callback onPrepare ERROR
+                        notify(jenv,MEDIA_ERR_PREPARE);
                         continue;
                     }
 
@@ -177,10 +190,10 @@ void Player::loop(void* ctx  )
                             }
                         }
                         setState(STATE::PREPARED);
-                        // TODO Callback onPrepare OK
+                        notify(jenv,MEDIA_PREPARED);
                     }else{
-                        // TODO Callback onPrepare ERROR
                         setState(STATE::ERROR);
+                        notify(jenv,MEDIA_ERR_PREPARE);
                     }
                 }
 
@@ -188,7 +201,21 @@ void Player::loop(void* ctx  )
                 break;
             case STATE::PREPARED:
                 if(cmd == EVENT::CMD_PLAY){
+
+                    mRender = new RenderThread();
+                    if(mADecoder != NULL){
+                        mADecoder->setRender(mRender);
+                        mADecoder->start();
+                        mDeMuxer->setAudioDecoder(mADecoder);
+                    }
+                    if(mVDecoder != NULL){
+                        mVDecoder->start();
+                        mVDecoder->setRender(mRender);
+                        mDeMuxer->setVideoDecoder(mVDecoder);
+                    }
                     mDeMuxer->play();
+
+                    setState(STATE::PLAYING);
                 }
 
                 break;
@@ -202,11 +229,17 @@ void Player::loop(void* ctx  )
                     // Play And Play again
                     // TODO onNotify
                     pass = true ;
+                }else if(cmd == EVENT::CMD_PLAY_COMPLETE){
+
+                }else if(cmd == EVENT::CMD_STOP){
+
                 }
                 break;
             case STATE::PAUSING:
                 break;
             case STATE::PAUSED:
+                break;
+            case STATE::STOPPING:
                 break;
             case STATE::STOPPED:
                 break;
@@ -222,6 +255,13 @@ void Player::loop(void* ctx  )
         }
     }
 
+}
+
+void Player::notify(JNIEnv *env, int type, int arg1 , int arg2, void *obj)
+{
+    env->CallStaticVoidMethod(
+            gJNIDragonPlayer.thizClass, gJNIDragonPlayer.postEvent,
+            mjObjWeakRef , type, arg1, arg2, obj);
 }
 
 void Player::sendEvent(EVENT event) {
@@ -252,6 +292,8 @@ const char* const Player::stateId2Str(STATE id)
             return "PAUSING";
         case PAUSED:
             return "PAUSED";
+        case STOPPING:
+            return "STOPPING";
         case STOPPED:
             return "STOPPED";
         case SEEKING:

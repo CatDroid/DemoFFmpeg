@@ -4,20 +4,20 @@
  *  Created on: 2016年12月17日
  *      Author: hanlon
  */
-
-#define LOG_TAG "RenderThread"
-
-
-#include <sys/prctl.h>
-#include "jni_common.h"
-
 #include "RenderThread.h"
 
+#include <sys/prctl.h>
+
+CLASS_LOG_IMPLEMENT(RenderThread,"RenderThread");
+
 #define VIDEO_RENDER_BUFFER_SIZE 20
-RenderThread::RenderThread(SurfaceView* view , AudioTrack* track ):
-									mpView(view),mpTrack(track),mStop(false),
-									mpSwsCtx(NULL),mSrcFrame(NULL),mDstFrame(NULL),mRenderTh(-1),
-									mStartSys(-1),mStartPts(-1)
+
+RenderThread::RenderThread(  ):
+		mpView(NULL),mpTrack(NULL),mpSwsCtx(NULL),
+		mSrcFrame(NULL),mDstFrame(NULL),
+		mStop(false),
+		mRenderTh(-1),
+		mStartSys(-1),mStartPts(-1)
 {
 
 
@@ -28,10 +28,12 @@ RenderThread::RenderThread(SurfaceView* view , AudioTrack* track ):
 	int ret = ::pthread_create(&mRenderTh , NULL ,  renderloop , this );
 	if( ret != 0 ){
 		mRenderTh = -1 ;
-		ALOGE("pthread_create ERROR %d %s " , errno ,strerror(errno));
+		TLOGE("pthread_create ERROR %d %s " , errno ,strerror(errno));
 	}
 
 }
+
+
 
 RenderThread::~RenderThread()
 {
@@ -42,7 +44,7 @@ RenderThread::~RenderThread()
 			mQueueCond->signal();
 			mFullCond->signal();
 		}
-		ALOGD("~RenderThread Join ");
+		TLOGD("~RenderThread Join ");
 		::pthread_join(mRenderTh , NULL );
 		mRenderTh = -1;
 		delete mQueueMutex; mQueueMutex = NULL;
@@ -54,7 +56,7 @@ RenderThread::~RenderThread()
 		av_frame_free(&mSrcFrame);
 		av_frame_free(&mDstFrame);
 	}
-	ALOGD("~RenderThread done ");
+	TLOGD("~RenderThread done ");
 }
 
 void RenderThread::renderAudio(sp<Buffer> buf)
@@ -85,7 +87,7 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 	sp<Buffer> rgbbuf = mBM->pop();
 
 	if(buf == NULL){// End Of File
-		ALOGW("RenderThread get End oF File");
+		TLOGW("RenderThread get End oF File");
 		rgbbuf = NULL ;
 	}else{
 		/*
@@ -112,11 +114,10 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 							  buf->height(),
 							  mDstFrame->data, mDstFrame->linesize );
 		// 不需要把AVFrame mDstFrame 进行 av_image_copy_to_buffer 因为RGBA只有一个平面 已经转换到了目标Buffer
-		//if( ret != height ){
-		//	ALOGE("sws_scale result %d ", ret ); // ????
-		//}
 
-		//ALOGD("linesize[0] = %d , mRGBSize = %d " ,mDstFrame->linesize[0] * buf->height() , mRGBSize );
+		TLOGT("output slice height %d ,  RGBA height %d " , ret , buf->height() );
+		//TLOGD("linesize[0] = %d , mRGBSize = %d " ,mDstFrame->linesize[0] * buf->height() , mRGBSize );
+
 		rgbbuf->width() = buf->width();
 		rgbbuf->height() = buf->height() ;
 		rgbbuf->pts() = buf->pts();
@@ -132,7 +133,7 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 			mQueueCond->signal();
 		}else{
 			if( mVideoRenderQueue.size() >= VIDEO_RENDER_BUFFER_SIZE ){
-				ALOGW("too much video RenderBuffer wait!");
+				TLOGW("too much video RenderBuffer wait!");
 				mFullCond->wait(mQueueMutex);
 				continue ;
 			}else{
@@ -173,7 +174,7 @@ void RenderThread::loop()
 		}
 
 		if( vbuf == NULL) {
-			ALOGW("video render thread: End Of File !");
+			TLOGW("video render thread: End Of File !");
 			break;
 		}
 
@@ -195,17 +196,17 @@ void RenderThread::loop()
 		//if( vbuf == NULL  ){
 		//	usleep(5000); // 23ms@   16ms@60fps
 		//}
-		ALOGD("draw w %d h %d size %d pts[A:%lld V:%lld ] A-V %lld ms " ,  vbuf->width(), vbuf->height() , vbuf->size() ,mpTrack->pts() ,  vbuf->pts() , (mpTrack->pts() - vbuf->pts()) );
+		TLOGD("draw w %d h %d size %d pts[A:%" PRId64 " V:%" PRId64 " ] A-V %" PRId64 " ms " ,  vbuf->width(), vbuf->height() , vbuf->size() ,mpTrack->pts() ,  vbuf->pts() , (mpTrack->pts() - vbuf->pts()) );
 		mpView->draw(vbuf->data() , vbuf->size() ,vbuf->width(), vbuf->height() );
 
 	}
 
 
 	while( !mStop && !mpTrack->isStoped() ){
-		ALOGW("video render thread wait for audio render thread mStop = %d isStoped = %d " , mStop , mpTrack->isStoped());
+		TLOGW("video render thread wait for audio render thread mStop = %d isStoped = %d " , mStop , mpTrack->isStoped());
 		usleep(10*1000);
 	}
-	ALOGW("video render thread Exit mStop = %d isStoped = %d " , mStop , mpTrack->isStoped());
+	TLOGW("video render thread Exit mStop = %d isStoped = %d " , mStop , mpTrack->isStoped());
 
 }
 

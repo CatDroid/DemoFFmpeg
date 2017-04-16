@@ -5,111 +5,43 @@
  *      Author: Hanloong Ho
  */
 
-
 #define LOG_TAG "jni_mp4player"
+
+#include <JClass.h>
+#include "Player.h"
 #include "jni_common.h"
-#include "LocalFileDemuxer.h"
-#include "H264SWDecoder.h"
-#include "SurfaceView.h"
-#include "AudioTrack.h"
-#include "AACSWDecoder.h"
+#include "JClass.h"
 
-static struct g_java_fields {
-    jfieldID    context; 	// native object pointer
-    jmethodID   post_event; // post event to Java Layer/Callback Function
-} g_java_field;
+JNIDragonPlayer gJNIDragonPlayer ;
 
-struct Mp4player{
-	LocalFileDemuxer*  mpDeMuxer ;
-	H264SWDecoder*  mpVDecoder ;
-	AACSWDecoder* mpADecoder ;
-	SurfaceView* mpView ;
-	AudioTrack* mpTrack ;
-	RenderThread* mpRender ;
+struct JNIPlayer{
+	Player* thizPlayer ;
 };
-
-static void JNICALL native_playmp4 (JNIEnv* env , jobject mp4player , jlong ctx, jstring file_obj , jobject surface , jobject at )
-{
-	const char* file = NULL;
-	JNI_GET_UTF_CHAR( file , file_obj);
-
-
-	Mp4player* player = new Mp4player();
-	player->mpDeMuxer = new LocalFileDemuxer(file);
-
-	AVCodecParameters* vpara = player->mpDeMuxer->getVideoCodecPara();
-	if( vpara != NULL){
-		switch(vpara->codec_id){
-		case AV_CODEC_ID_H264:
-			player->mpVDecoder  = new H264SWDecoder(vpara ,  player->mpDeMuxer->getVideoTimebase() );
-			break;
-		default:
-			ALOGE("don NOT support %d " , vpara->codec_id );
-			assert(vpara->codec_id == AV_CODEC_ID_H264);
-			break;
-		}
-	}
-
-	AVCodecParameters* apara = player->mpDeMuxer->getAudioCodecPara();
-	if( apara != NULL){
-		switch(apara->codec_id){
-		case AV_CODEC_ID_AAC:
-			player->mpADecoder = new AACSWDecoder(apara ,  player->mpDeMuxer->getAudioTimebase()  );
-			break;
-		default:
-			ALOGE("don NOT support %d " , apara->codec_id );
-			assert(apara->codec_id == AV_CODEC_ID_AAC);
-			break;
-		}
-	}
-
-	// release at SurfaceView
-	player->mpView = new SurfaceView(ANativeWindow_fromSurface(env,surface), vpara->width, vpara->height );
-	player->mpTrack = new AudioTrack(apara->channels, apara->sample_rate);
-	player->mpRender = new RenderThread(player->mpView, player->mpTrack);
-
-
-	player->mpDeMuxer->setAudioSinker(player->mpADecoder);
-	player->mpDeMuxer->setVideoSinker(player->mpVDecoder);
-	player->mpVDecoder->start(player->mpRender);
-	player->mpADecoder->start(player->mpRender);
-	player->mpDeMuxer->play();
-
-
-	env->SetLongField(mp4player ,g_java_field.context, (long)player);
-	JNI_RELEASE_STR_STR(file , file_obj);
-
-}
-
-
-//static void JNICALL native_stop (JNIEnv* jenv , jobject mp4player, jlong ctx)
-//{
-//	Mp4player* player =  (Mp4player*)ctx ;
-//	jenv->SetLongField(mp4player ,g_java_field.context, 0);
-//	player->mpDeMuxer->stop();
-//	player->mpVDecoder->stop();
-//	player->mpADecoder->stop();
-//	delete player->mpVDecoder;
-//	delete player->mpADecoder;
-//	delete player->mpDeMuxer;
-//	delete player->mpRender;
-//	delete player->mpTrack;
-//	delete player->mpView;
-//}
 
 
 static long JNICALL native_setup(JNIEnv *env, jobject thiz, jobject player_this_ref )
 {
-
+	JNIPlayer* jplayer = new JNIPlayer();
+	jplayer->thizPlayer = new Player(env->NewGlobalRef(player_this_ref));
+	LOGT(LOG_TAG , "native_setup %p" , (void*)jplayer );
+	return (long) jplayer;
 }
 
 static jboolean JNICALL native_setDataSource(JNIEnv *env, jobject thiz, jlong ctx, jstring path)
 {
-
+	LOGT(LOG_TAG , "native_setDataSource %p" , (void*)ctx );
+	const char* file = NULL;
+	JNI_GET_UTF_CHAR( file , path);
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	bool result = jplayer->thizPlayer->setDataSource(file);
+	JNI_RELEASE_STR_STR(file , path);
+	return result?(jboolean)JNI_TRUE:(jboolean)JNI_FALSE;
 }
 static void JNICALL native_prepareAsync(JNIEnv *env, jobject thiz, jlong ctx)
 {
-
+	LOGT(LOG_TAG , "native_prepareAsync %p" , (void*)ctx );
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	jplayer->thizPlayer->prepare();
 }
 
 static void JNICALL native_free(JNIEnv *env, jobject thiz, jlong ctx )
@@ -119,12 +51,14 @@ static void JNICALL native_free(JNIEnv *env, jobject thiz, jlong ctx )
 
 static jboolean JNICALL  native_setDisplay(JNIEnv *env, jobject thiz, jlong player_ctx, jobject jSurface )
 {
-
+	return true ;
 }
 
 static void JNICALL native_play(JNIEnv *env, jobject thiz, jlong ctx )
 {
-
+	LOGT(LOG_TAG , "native_play %p" , (void*)ctx );
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	jplayer->thizPlayer->play();
 }
 static void JNICALL native_pause(JNIEnv *env, jobject thiz, jlong ctx)
 {
@@ -143,42 +77,42 @@ static void JNICALL native_stop(JNIEnv *env, jobject thiz, jlong ctx)
 
 static jboolean JNICALL  native_setVolume(JNIEnv *env, jobject thiz, jlong ctx , jfloat left , jfloat right )
 {
-
+	return JNI_FALSE ;
 }
 
 static jboolean JNICALL  native_setMute(JNIEnv *env, jobject thiz, jlong ctx , jboolean on)
 {
-
+	return JNI_FALSE ;
 }
 
 static jint JNICALL native_getDuration(JNIEnv *env, jobject thiz, jlong ctx )
 {
-
+	return 0 ;
 }
 static jint JNICALL native_getCurrentPosition(JNIEnv *env, jobject thiz, jlong ctx )
 {
-
+	return 0 ;
 }
 
 static jint JNICALL native_getAudioChannel(JNIEnv *env, jobject thiz, jlong ctx )
 {
-
+	return 0 ;
 }
 static jint JNICALL native_getAudioDepth(JNIEnv *env, jobject thiz, jlong ctx )
 {
-
+	return 0 ;
 }
 static jint JNICALL native_getAudioSampleRate(JNIEnv *env, jobject thiz, jlong ctx )
 {
-
+	return 0 ;
 }
 static jint JNICALL native_getVideoWidth(JNIEnv *env, jobject thiz, jlong ctx )
 {
-
+	return 0 ;
 }
 static jint JNICALL native_getVideoHeight(JNIEnv *env, jobject thiz, jlong ctx )
 {
-
+	return 0 ;
 }
 
 static void JNICALL native_subscribeData(JNIEnv *env, jobject thiz, jlong ctx , jint data_type , jboolean isOn)
@@ -220,7 +154,7 @@ jboolean register_com_catdroid_core_dragonplayer(JNIEnv *env)
 		{ "native_getVideoWidth",		"(J)I", 						(void*)native_getVideoWidth },
 		{ "native_getVideoHeight",		"(J)I", 						(void*)native_getVideoHeight },
 
-		{ "native_setData", 			"(JIZ)V",						(void*)native_subscribeData },
+		{ "native_subscribeData", 			"(JIZ)V",						(void*)native_subscribeData },
 	};
 	jniRegisterNativeMethods( env, DRAGON_PLAYER_JAVA_CLASS_PATH ,  method_table, NELEM(method_table)) ;
 
@@ -229,7 +163,10 @@ jboolean register_com_catdroid_core_dragonplayer(JNIEnv *env)
 //    };
 //    find_fields( env , fields_to_find, NELEM(fields_to_find) );
 
-    return JNI_TRUE;
+	gJNIDragonPlayer.thizClass = (jclass)env->NewGlobalRef(clazz);
+	gJNIDragonPlayer.postEvent = env->GetStaticMethodID( clazz, "postEventFromNative", "(Ljava/lang/Object;IIILjava/lang/Object;)V");
+
+	return JNI_TRUE;
 
 }
 

@@ -5,6 +5,9 @@
 
 extern "C"{
 #include "libavutil/log.h"
+#include "libavformat/avformat.h"
+#include "libavutil/error.h"
+#include "libavcodec/avcodec.h"
 };
 
 

@@ -72,13 +72,32 @@ public :
 	virtual void stop() override;
 	virtual bool getParseResult() override {return mParseResult;}
 
+public:
+	//无论是SPS PPS VPS ESDS都带有引导头 00 00 00 01
+	virtual const char *getSps() override {
+		return mSPS.c_str();
+	}
+
+	virtual const char *getPps() override {
+		return mPPS.c_str();
+	}
+
+	virtual const char *getVps() override {
+		// TODO
+		return NULL;
+	}
+
 private:
+
 	static void* sExtractThread(void *arg);
 	bool parseFile(); // 返回false 代表prepare失败了
 	void loop() ;
+
+	//无论是SPS PPS VPS ESDS都带有引导头 00 00 00 01
 	void setupVideoSpec(bool is_pps , bool addLeaderCode , unsigned char *data, int size);
 	void setupAudioSpec(bool addLeaderCode , unsigned char *data, int size);
 
+	const char* const pixelFormat2str(AVPixelFormat pixel );
 
 private:
 	CLASS_LOG_DECLARE(LocalFileDemuxer);

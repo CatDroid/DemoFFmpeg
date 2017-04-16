@@ -28,6 +28,7 @@ public:
         PAUSING,
         PAUSED,
         STOPPED,
+        STOPPING,
         SEEKING,
         ERROR,
     };
@@ -43,21 +44,26 @@ public:
     };
 
 private:
+    jobject mjObjWeakRef ; // move out
+
     DeMuxer* mDeMuxer ;
     Decoder* mVDecoder ;
     Decoder* mADecoder ;
     Render*  mRender ;
+
     STATE mState  ;
     bool mStop ;
     std::list<EVENT> mCmdQueue;
     Mutex* mCmdMutex;
     Condition* mCmdCond;
     pthread_t mThreadID;
+
+
     std::string mPlayURI;
     int32_t mSeekToMs ;
 
 public:
-    Player();
+    Player(jobject jWeakRef);
     virtual ~Player();
 
     // 外部调用接口
@@ -72,6 +78,8 @@ public:
     // 内部调用接口
     virtual void prepare_result();
 
+    // 通知应用层接口
+    void notify(JNIEnv *env, int type, int arg1 = 0 , int arg2 = 0 , void *obj = NULL);
 
 private:
     static void* sStateMachineTh(void*);

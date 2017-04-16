@@ -11,7 +11,13 @@
 #include "string.h"
 
 extern "C" {
+	#include "libavutil/frame.h"
+	#include "libavutil/imgutils.h"
 	#include "libavutil/error.h"
+	#include "libavformat/avformat.h"
+	#include "libavcodec/avcodec.h"
+	#include "libswscale/swscale.h"
+
 }
 void ffmpeg_strerror( int error_num , const char* prefix = NULL);
 

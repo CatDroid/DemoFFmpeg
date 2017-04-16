@@ -17,8 +17,8 @@
 #include <unistd.h>
 #include <time.h>
 
-#define DUMP_BUFFER_IN_HEX(tips, buffer, size) \
-				dumpBuffer2Hex(tips, buffer , size , ANDROID_LOG_DEBUG , LOG_TAG);
+#define DUMP_BUFFER_IN_HEX(tips, buffer, size, tag ) \
+				dumpBuffer2Hex(tips, buffer , size , ANDROID_LOG_DEBUG , tag);
 
 void dumpBuffer2Hex(const char* tips , uint8_t* buffer , int size , android_LogPriority level , const char* tag );
 

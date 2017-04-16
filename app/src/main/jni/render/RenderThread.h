@@ -9,43 +9,44 @@
 #define RENDERTHREAD_H_
 
 
-extern "C"{
-#include "libswscale/swscale.h"
-#include "libavutil/frame.h"
-#include "libavutil/imgutils.h"
-}
 
-#include "SurfaceView.h"
-#include "AudioTrack.h"
 #include <list>
 #include <pthread.h>
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
-#include <Condition.h>
 
+#include "ffmpeg_common.h"
+#include "Log.h"
 #include "SaveFile.h"
 #include "Buffer.h"
 #include "BufferManager.h"
+#include "Render.h"
+#include "Condition.h"
+#include "SurfaceView.h"
+#include "AudioTrack.h"
 
-class RenderThread
+class RenderThread : public Render
 {
 public:
-	RenderThread(SurfaceView* view , AudioTrack* track  );
-	~RenderThread();
+	RenderThread(  );
+	virtual  ~RenderThread();
 	void renderAudio(sp<Buffer> buf);
 	void renderVideo(sp<Buffer> buf);
 	void loop();
 	static void* renderloop(void* arg);
 private:
-	pthread_t mRenderTh;
+
 	SurfaceView* mpView ;
 	AudioTrack* mpTrack;
 	struct SwsContext *mpSwsCtx;
 	AVFrame* mSrcFrame ;
 	AVFrame* mDstFrame ;
 	int32_t mRGBSize ;
+
 	volatile  bool mStop ;
+	pthread_t mRenderTh;
+
 	int64_t mStartSys ;
 	int64_t mStartPts ;
 	std::list<sp<Buffer>> mAudioRenderQueue;
@@ -56,6 +57,9 @@ private:
 	sp<BufferManager> mBM;
 
 	sp<SaveFile> mDebugFile ;
+
+private:
+	CLASS_LOG_DECLARE(RenderThread);
 };
 
 
