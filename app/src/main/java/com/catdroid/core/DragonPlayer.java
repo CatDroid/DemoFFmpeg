@@ -152,7 +152,7 @@ public class DragonPlayer {
 	public static final int MEDIA_DATA						= 100 ;
 
 	public static final int MEDIA_INFO						= 200 ;
-	public static final int MEDIA_INFO_PAUSE_COMPLETED 		= MEDIA_INFO + 5 ;
+	public static final int MEDIA_INFO_PAUSE_COMPLETED 		= MEDIA_INFO + 1 ;
 
 	public static final int MEDIA_ERR						= 400 ; // like 404 ..
 	public static final int MEDIA_ERR_SEEK					= MEDIA_ERR + 1 ;
