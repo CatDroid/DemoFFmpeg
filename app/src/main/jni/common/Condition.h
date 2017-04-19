@@ -98,11 +98,7 @@ inline status_t Condition::waitRelative(Mutex& mutex, uint64_t reltime) {
     ts.tv_sec  = reltime/1000000000;
     ts.tv_nsec = reltime%1000000000;
     return -pthread_cond_timedwait_relative_np(&mCond, &mutex.mMutex, &ts);
-
-
 #else // HAVE_PTHREAD_COND_TIMEDWAIT_RELATIVE
-
-
     struct timespec ts;
 #if defined(HAVE_POSIX_CLOCKS)
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -113,7 +109,6 @@ inline status_t Condition::waitRelative(Mutex& mutex, uint64_t reltime) {
     ts.tv_sec = t.tv_sec;
     ts.tv_nsec= t.tv_usec*1000;
 #endif // HAVE_POSIX_CLOCKS
-
 
     ts.tv_sec += reltime/1000000000;
     ts.tv_nsec+= reltime%1000000000;

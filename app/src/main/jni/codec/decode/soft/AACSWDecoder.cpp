@@ -340,13 +340,13 @@ void AACSWDecoder::deqloop(){
 						  mDecodedFrameSize
 					);
 					buf->size() = mDecodedFrameSize;
-					buf->pts() = (int64_t) (pFrame->pts * mTimeBase * 1000); // ms
+					buf->pts() = (int64_t) (pFrame->pts * 1000 * 1000 * mTimeBase ); // us
 
 #ifdef SAVE_DECODE_TO_FILE
 					mSaveFile->save(  buf->data()  , buf->size());
 #endif
 					// TODO 给到渲染线程
-					//mpRender->renderAudio( buf ) ;
+					mRender->renderAudio( buf ) ;
 				} else {
 					TLOGE("deqloop swr_convert error \n");
 					// TODO 给Player发送错误事件  Player切换到错误状态 并且反馈给应用层
@@ -357,8 +357,10 @@ void AACSWDecoder::deqloop(){
 			case AVERROR_EOF:{
 				// TODO 告诉Player文件已经解码完毕 可能等待渲染结束
 				TLOGW("deqloop 解码器完全清空, 没有更多帧输出.\n");
-				// TODO 告诉渲染线程文件已经结束
-				// mRender->renderAudio(NULL) ;
+				sp<Buffer> buf = mBufMgr->pop();
+				buf->pts() = -1 ;
+				buf->size() = -1 ; //mark end
+				mRender->renderVideo(buf) ;
 				end = true ;
 			}break;
 			case AVERROR(EAGAIN):{

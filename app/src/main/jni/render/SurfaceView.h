@@ -12,16 +12,15 @@
 
 class SurfaceView
 {
+private:
+	ANativeWindow *mpSurface ;
+	uint32_t mWidth ;
+	uint32_t mHeight ;
+
 public:
 	SurfaceView(ANativeWindow * window, uint32_t width , uint32_t height );
 	~SurfaceView();
-
 	void draw(uint8_t* buffer , uint32_t size , uint32_t width , uint32_t height );
-private:
-	 ANativeWindow *mpSurface ;
-	 uint32_t mWidth ;
-	 uint32_t mHeight ;
-
 };
 
 #endif /* SURFACEVIEW_H_ */

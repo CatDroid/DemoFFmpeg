@@ -10,19 +10,17 @@
 
 CLASS_LOG_IMPLEMENT(RenderThread,"RenderThread");
 
-#define VIDEO_RENDER_BUFFER_SIZE 20
+#define VIDEO_RENDER_BUFFER_SIZE 30
+#define AUDIO_RENDER_BUFFER_SIZE 46
 
-RenderThread::RenderThread(  ):
-		mpView(NULL),mpTrack(NULL),mpSwsCtx(NULL),
-		mSrcFrame(NULL),mDstFrame(NULL),
-		mStop(false),
-		mRenderTh(-1),
-		mStartSys(-1),mStartPts(-1)
+RenderThread::RenderThread(  ):mpTrack(NULL),
+		mpView(NULL),mpSwsCtx(NULL),
+		mSrcFrame(NULL),mDstFrame(NULL),mRGBSize(0),
+		mStop(false),  mRenderTh(-1),
+		mStartSys(-1),mVidStartPts(-1),mAudStartPts(-1)
 {
-
+	TLOGT("RenderThread");
 }
-
-
 
 
 void RenderThread::renderAudio(sp<Buffer> buf)
@@ -32,13 +30,28 @@ void RenderThread::renderAudio(sp<Buffer> buf)
 //	}
 //	mDebugFile->save(buf->data(),buf->size());
 
-	mpTrack->write(buf);
+	while(!mStop){
+		AutoMutex l(mQueMtx);
+		bool empty = mAudRdrQue.empty();
+		if(empty){
+			mAudRdrQue.push_back(buf);
+			mSrcCond.signal();
+		}else{
+			if( mAudRdrQue.size() >= AUDIO_RENDER_BUFFER_SIZE ){
+				TLOGW("too much audio RenderBuffer wait!");
+				mAQueCond.wait(mQueMtx);
+				continue ;
+			}else{
+				mAudRdrQue.push_back(buf);
+			}
+		}
+		break;
+	}
 }
 
 void RenderThread::renderVideo(sp<Buffer> buf)
 {
 	if( mpSwsCtx == NULL ){
-
 		mpSwsCtx = sws_getContext(buf->width(), buf->height(), (AVPixelFormat)buf->fmt(),/*AV_PIX_FMT_YUV420P*/
 								  buf->width(), buf->height(), AV_PIX_FMT_RGBA,
 									SWS_FAST_BILINEAR,
@@ -57,22 +70,21 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 		rgbbuf = NULL ;
 	}else{
 		/*
-	 * av_image_xxx 系列 比  avpicture_xxx系列 增加了 linesize的alian对齐参数
-	 */
+	 	* av_image_xxx 系列 比  avpicture_xxx系列 增加了 linesize的alian对齐参数
+	 	*/
 		av_image_fill_arrays(mSrcFrame->data, mSrcFrame->linesize, buf->data() , (AVPixelFormat)buf->fmt() /*AV_PIX_FMT_YUV420P*/, buf->width(), buf->height(), 1);
 		av_image_fill_arrays(mDstFrame->data, mDstFrame->linesize, rgbbuf->data() , AV_PIX_FMT_RGBA, buf->width(), buf->height(), 1);
 
-
 		/*
-             * @param c         上下文 sws_getContext()
-             * @param srcSlice  数组 包含源slice的各个平面的指针
-             * @param srcStride 数组 包含源image的各个平面的步幅
-             * @param srcSliceY 将要处理slice在源image的位置 也就是 image第一行的位置(从0开始)
-             * @param srcSliceH 源slice的高度, 也就是slice的行数
-             * @param dst       数组 包含目标image的各个平面的指针
-             * @param dstStride 数组 包含目标image的各个平面的步幅(大小? stride)
-             * @return          输出的高度? the height of the output slice
-             */
+		 * @param c         上下文 sws_getContext()
+		 * @param srcSlice  数组 包含源slice的各个平面的指针
+		 * @param srcStride 数组 包含源image的各个平面的步幅
+		 * @param srcSliceY 将要处理slice在源image的位置 也就是 image第一行的位置(从0开始)
+		 * @param srcSliceH 源slice的高度, 也就是slice的行数
+		 * @param dst       数组 包含目标image的各个平面的指针
+		 * @param dstStride 数组 包含目标image的各个平面的步幅(大小? stride)
+		 * @return          输出的高度? the height of the output slice
+		 */
 		int ret  = sws_scale( mpSwsCtx,
 							  mSrcFrame->data,
 							  mSrcFrame->linesize,
@@ -92,18 +104,18 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 
 
 	while(!mStop){
-		AutoMutex l(mQueueMutex);
-		bool empty = mVideoRenderQueue.empty();
+		AutoMutex l(mQueMtx);
+		bool empty = mVidRdrQue.empty();
 		if(empty){
-			mVideoRenderQueue.push_back(rgbbuf);
-			mQueueCond.signal();
+			mVidRdrQue.push_back(rgbbuf);
+			mSrcCond.signal();
 		}else{
-			if( mVideoRenderQueue.size() >= VIDEO_RENDER_BUFFER_SIZE ){
+			if( mVidRdrQue.size() >= VIDEO_RENDER_BUFFER_SIZE ){
 				TLOGW("too much video RenderBuffer wait!");
-				mFullCond.wait(mQueueMutex);
+				mVQueCond.wait(mQueMtx);
 				continue ;
 			}else{
-				mVideoRenderQueue.push_back(rgbbuf);
+				mVidRdrQue.push_back(rgbbuf);
 			}
 		}
 		break;
@@ -119,64 +131,155 @@ int64_t getCurTimeMs()
 	return (uint64_t)(now.tv_sec * 1000UL + now.tv_nsec / 1000000UL);
 }
 
+int64_t getCurTimeUs()
+{
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (uint64_t)(now.tv_sec * 1000UL * 1000UL + now.tv_nsec / 1000UL);
+}
+
 
 void RenderThread::loop()
 {
-	while( ! mStop ){
+	bool audio_end = false ;
+	bool video_end = false ;
+	TLOGD("RenderThread entry");
+	while( !mStop || (audio_end&&video_end)){
 		sp<Buffer> vbuf = NULL;
+		sp<Buffer> abuf = NULL;
+
 		{
-			AutoMutex l(mQueueMutex);
-			if( ! mVideoRenderQueue.empty()  )
+			AutoMutex l(mQueMtx);
+			if( ! mVidRdrQue.empty()  ) {
+				vbuf = mVidRdrQue.front();
+				if (vbuf->size() == -1 ){
+					mVidRdrQue.pop_front();
+					vbuf = NULL;
+					video_end = true ;
+				}
+				TLOGT("get Video ");
+			}
+
+			if( ! mAudRdrQue.empty() ){
+				abuf = mAudRdrQue.front();
+				if (abuf->size() == -1 ){
+					mAudRdrQue.pop_front();
+					abuf = NULL;
+					audio_end = true ;
+				}
+				TLOGT("get Audio ");
+			}
+
+			if(mVidStartPts == -1 || mAudStartPts ==-1 ){
+				if(vbuf.get() == NULL || abuf.get() == NULL ){
+					// 必须等待视频第一帧过来才开始播放 否者音频会过早播放(音频解码快 而且不像H264这样会有'解码延迟')
+					TLOGW("sync wait for video and audio");
+					mSrcCond.wait(mQueMtx);
+					continue ;
+				}
+			}
+			if(vbuf.get() == NULL && abuf.get() == NULL ){
+				mSrcCond.wait(mQueMtx);
+				continue ;
+			}
+		}
+
+		bool renderAudio = true ;
+		int64_t nowus = getCurTimeUs()  ;
+
+		if( mVidStartPts == -1 && vbuf.get() != NULL ) mVidStartPts = vbuf->pts();
+		if( mAudStartPts == -1 && abuf.get() != NULL ) mAudStartPts = abuf->pts();
+		if( mStartSys == -1 ) mStartSys = nowus;
+
+
+		TLOGT("vs=%" PRId64 ",as=%" PRId64 ",vbuf=%p(%" PRId64 "),abuf=%p(%" PRId64 ")" ,
+			  mVidStartPts , mAudStartPts ,
+			  vbuf.get() , (vbuf.get()==NULL)?-111:vbuf.get()->pts(),
+			  abuf.get() , (abuf.get()==NULL)?-111:abuf.get()->pts());
+
+		int64_t near_time ;
+		if(vbuf.get() != NULL && abuf.get() != NULL ){
+			int64_t play_vtime = mStartSys + ( vbuf->pts() - mVidStartPts );
+			int64_t play_atime = mStartSys + ( abuf->pts() - mAudStartPts ) ;
+
+			if( play_vtime > play_atime){
+				near_time = play_atime ;
+				renderAudio = true ;
+			}else{
+				near_time = play_vtime;
+				renderAudio = false ;
+			}
+
+		}else if(NULL != vbuf.get()){
+			renderAudio = false ;
+			near_time = mStartSys + ( vbuf->pts() - mVidStartPts ) ;
+		}else {
+			renderAudio = true ;
+			near_time = mStartSys + ( abuf->pts() - mVidStartPts ) ;
+		}
+
+
+		int64_t delayus = near_time - nowus  ;
+
+
+		if( delayus > 5000 ){ // 5ms
 			{
-				int size = mVideoRenderQueue.size();
-				vbuf = mVideoRenderQueue.front();
-				mVideoRenderQueue.pop_front();
-				if( size >= VIDEO_RENDER_BUFFER_SIZE ) mFullCond.signal();
+				AutoMutex l(mQueMtx);
+				mSrcCond.waitRelative(mQueMtx , (((uint64_t) delayus - 5000) * 1000));
+			}
+			continue ;
+		}else if(delayus < -5000 ){
+			TLOGE("%s too lateny %" PRId64 "!" , renderAudio?"a":"v",delayus );
+		}
+
+
+		{
+			AutoMutex l(mQueMtx);
+			if(renderAudio){
+				mAudRdrQue.pop_front();
+				mAQueCond.signal();
 			}else{
-				if( mStop ) break;
-				mQueueCond.wait(mQueueMutex);
-				continue;
+				mVidRdrQue.pop_front();
+				mVQueCond.signal();
 			}
 		}
 
-		if( vbuf == NULL) {
-			TLOGW("video render thread: End Of File !");
-			break;
-		}
-
-		int64_t now = getCurTimeMs()  ;
-		if( mStartSys == -1 ){
-			mStartSys = now ;
-			mStartPts = vbuf->pts() ;
+		if(renderAudio){
+			TLOGD("write audio size %d pts %" PRId64 , abuf->size() , abuf->pts());
+			mpTrack->write(abuf);
 		}else{
-
-			int64_t play_time = mStartSys + ( vbuf->pts() - mStartPts );
-			int64_t delay = play_time - now  ;
-			if( delay > 0){
-				usleep( delay *1000 );
+			TLOGD("draw w %d h %d size %d pts[A:%" PRId64 " V:%" PRId64 " ] A-V %" PRId64 " ms " ,
+				  vbuf->width(), vbuf->height() , vbuf->size() ,
+				  mpTrack->pts() ,  vbuf->pts() , (mpTrack->pts() - vbuf->pts()) );
+			if(mpView == NULL){
+				TLOGW("window is NOT set, but get VIDEO frame!");
 			}else{
-				// drop ????
+				//int64_t before = getCurTimeUs()  ;
+				//TLOGT("before draw");
+				// Draw相当耗时 在16ms左右 可能跟VSYNC 屏幕刷新60有关
+				mpView->draw(vbuf->data() , (uint32_t) vbuf->size(), (uint32_t) vbuf->width(), (uint32_t) vbuf->height());
+				//TLOGT("after draw %" PRId64 ,(getCurTimeUs()-before) );
 			}
+
 		}
 
-		//if( vbuf == NULL  ){
-		//	usleep(5000); // 23ms@   16ms@60fps
-		//}
-		TLOGD("draw w %d h %d size %d pts[A:%" PRId64 " V:%" PRId64 " ] A-V %" PRId64 " ms " ,  vbuf->width(), vbuf->height() , vbuf->size() ,mpTrack->pts() ,  vbuf->pts() , (mpTrack->pts() - vbuf->pts()) );
-		mpView->draw(vbuf->data() , vbuf->size() ,vbuf->width(), vbuf->height() );
-
 	}
 
-	if(mpTrack == NULL) return ; // TODO
-	while( !mStop && !mpTrack->isStoped() ){
-		TLOGW("video render thread wait for audio render thread mStop = %d isStoped = %d " , mStop , mpTrack->isStoped());
-		usleep(10*1000);
+	if(video_end && audio_end ){
+		//TODO 通知应用层播放完毕
 	}
-	TLOGW("video render thread Exit mStop = %d isStoped = %d " , mStop , mpTrack->isStoped());
 
+//	if(mpTrack == NULL) return ; // TODO
+//	while( !mStop && !mpTrack->isStoped() ){
+//		TLOGW("video render thread wait for audio render thread mStop = %d isStoped = %d " , mStop , mpTrack->isStoped());
+//		usleep(10*1000);
+//	}
+//	TLOGW("video render thread Exit mStop = %d isStoped = %d " , mStop , mpTrack->isStoped());
+
+	TLOGD("RenderThread exit");
 }
 
-void* RenderThread::renderloop(void* arg)
+void* RenderThread::renderThreadEntry(void *arg)
 {
 	prctl(PR_SET_NAME,"MyRenderThread");
 	RenderThread* pthread = (RenderThread*)arg;
@@ -187,7 +290,17 @@ void* RenderThread::renderloop(void* arg)
 
 
 void RenderThread::start() {
-	int ret = ::pthread_create(&mRenderTh , NULL ,  renderloop , this );
+
+	if(mAChannls!= -1 && mASampleRate!= -1 ){
+		TLOGD("create AudioTrack with channel %d sampleRate %d " , mAChannls,mASampleRate);
+		mpTrack = new AudioTrack((uint32_t) mAChannls, (uint32_t) mASampleRate);
+	}
+	if(mNWin != NULL && mVWidth != -1 && mVHeight != -1 ){
+		TLOGD("create SurfaceView with mNWin %p width %d height %d " , mNWin, mVWidth , mVHeight);
+		mpView = new SurfaceView((ANativeWindow *)mNWin, mVWidth , mVHeight);
+	}
+
+	int ret = ::pthread_create(&mRenderTh, NULL, renderThreadEntry, this);
 	if( ret != 0 ){
 		mRenderTh = -1 ;
 		TLOGE("pthread_create ERROR %d %s " , errno ,strerror(errno));
@@ -199,17 +312,47 @@ void RenderThread::pause() {
 }
 
 void RenderThread::stop() {
+	TLOGD("RenderThread::stop Enter ");
 	mStop = true ;
 	if( mRenderTh != -1 ){
 		{
-			AutoMutex l(mQueueMutex);
-			mQueueCond.signal();
-			mFullCond.signal();
+			AutoMutex l(mQueMtx);
+			mAQueCond.signal();
+			mVQueCond.signal();
+			mSrcCond.signal();
 		}
-		TLOGD("~RenderThread Join ");
+		TLOGD("RenderThread::stop Join Enter ");
 		::pthread_join(mRenderTh , NULL );
+		TLOGD("RenderThread::stop Join Done ");
 		mRenderTh = -1;
 	}
+
+	{
+		AutoMutex l(mQueMtx);
+		TLOGI("pending Audio Render Queue size %lu", mAudRdrQue.size() );
+		std::list<sp<Buffer>>::iterator it = mAudRdrQue.begin();
+		while(it != mAudRdrQue.end()) {
+			mAudRdrQue.erase(it++);
+		}
+
+		TLOGI("pending Video Render Queue size %lu", mVidRdrQue.size() );
+		it = mVidRdrQue.begin();
+		while(it != mVidRdrQue.end()) {
+			mVidRdrQue.erase(it++);
+		}
+
+		TLOGI("clean up Render Queue Done!");
+	}
+
+
+	if(mpTrack!=NULL){
+		delete mpTrack; mpTrack = NULL;
+	}
+
+	if(mpView != NULL){
+		delete mpView ; mpView = NULL;
+	}
+	TLOGD("RenderThread::stop Done ");
 }
 
 
@@ -220,7 +363,7 @@ RenderThread::~RenderThread()
 		av_frame_free(&mSrcFrame);
 		av_frame_free(&mDstFrame);
 	}
-	TLOGD("~RenderThread done ");
+	TLOGD("~RenderThread");
 }
 
 

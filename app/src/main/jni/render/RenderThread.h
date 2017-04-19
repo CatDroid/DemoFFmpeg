@@ -28,38 +28,51 @@
 
 class RenderThread : public Render
 {
-public:
-	RenderThread(  );
-	virtual  ~RenderThread() ;
-	void renderAudio(sp<Buffer> buf) override;
-	void renderVideo(sp<Buffer> buf) override;
-	void loop();
-	static void* renderloop(void* arg);
-	void start() override ;
-	void stop() override ;
-	void pause() override ;
-private:
 
-	SurfaceView* mpView ;
+private:
+	// 音频相关
 	AudioTrack* mpTrack;
+ 	// 视频相关
+	SurfaceView* mpView ;
 	struct SwsContext *mpSwsCtx;
 	AVFrame* mSrcFrame ;
 	AVFrame* mDstFrame ;
 	int32_t mRGBSize ;
-
+	// 线程相关
 	volatile  bool mStop ;
 	pthread_t mRenderTh;
 
-	int64_t mStartSys ;
-	int64_t mStartPts ;
-	std::list<sp<Buffer>> mAudioRenderQueue;
-	std::list<sp<Buffer>> mVideoRenderQueue;
-	Mutex mQueueMutex ;
-	Condition mQueueCond ;
-	Condition mFullCond ;
+	// 同步相关
+	int64_t mStartSys ;		// 记录第一个视频/音频包播放时的系统启动时间 us
+	int64_t mVidStartPts ;	// 记录第一个视频时间
+	int64_t mAudStartPts ;  // 记录第一个音频时间
+
+	// 缓冲队列相关
+	std::list<sp<Buffer>> mAudRdrQue; // Audio Render Queue
+	std::list<sp<Buffer>> mVidRdrQue; // Video Render Queue
+	Mutex mQueMtx ;			// 保护两个队列
+	Condition mVQueCond ;	// 视频队列已经有空位
+	Condition mAQueCond ;	// 音频队列已经有空位
+	Condition mSrcCond ;	// 有新的数据加入Audio/Video队列
 	sp<BufferManager> mBM;
 
+	// 调试
 	sp<SaveFile> mDebugFile ;
+
+public:
+	RenderThread(  );
+	virtual  ~RenderThread() ;
+
+	void loop();
+	static void* renderThreadEntry(void *arg);
+
+
+	// Render接口
+	void renderAudio(sp<Buffer> buf) override;
+	void renderVideo(sp<Buffer> buf) override;
+	void start() override ;
+	void stop() override ;
+	void pause() override ;
 
 private:
 	CLASS_LOG_DECLARE(RenderThread);

@@ -27,7 +27,7 @@ public:
     bool alloc(int32_t size);
     void reset(sp<BufferManager>bm);
     uint8_t* data(){return mPtr;}
-    int64_t& pts() {return mPts;} //ms
+    int64_t& pts() {return mPts;} //us
     int32_t& size() {return mSize;}
     int32_t& width() {return mWidth;}
     int32_t& height() {return mHeight;}

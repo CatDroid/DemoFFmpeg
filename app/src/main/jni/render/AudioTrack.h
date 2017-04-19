@@ -19,6 +19,14 @@
 
 class AudioTrack
 {
+
+private:
+	int64_t mCurrentPts ; // ms
+	sp<Buffer> mLastQueuedBuffer ;
+	// Only for debug +++
+	sp<SaveFile> mSaveFile;
+	// Only for debug ---
+
 private:
 	// engine interfaces
 	SLObjectItf mEngineObject;
@@ -38,12 +46,6 @@ private:
 
 	friend class RenderThread;
 	bool isStoped() { return mStoped ; }
-public:
-	AudioTrack(uint32_t channel /*1 or 2 */, uint32_t sample_rate /*unit:Hz*/);
-	~AudioTrack();
-	bool setVolume( float volume);
-	bool setMute( bool mute );
-	bool write( sp<Buffer> );
 	Condition* mBufCon;
 	Condition* mBufFullCon;
 	Mutex* mBufMux ;
@@ -52,17 +54,13 @@ public:
 	bool mStarted;
 	volatile  bool mStoped;
 
+public:
+	AudioTrack(uint32_t channel /*1 or 2 */, uint32_t sample_rate /*unit:Hz*/);
+	~AudioTrack();
+	bool setVolume( float volume);
+	bool setMute( bool mute );
+	bool write( sp<Buffer> );
 	int64_t pts() const {return mCurrentPts;}
-
-private:
-	int64_t mCurrentPts ; // ms
-
-	sp<Buffer> mLastQueuedBuffer ;
-
-	// Only for debug +++
-	sp<SaveFile> mSaveFile;
-
-	// Only for debug ---
 
 };
 

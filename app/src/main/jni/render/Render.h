@@ -10,13 +10,18 @@
 
 class Render {
 
-private:
+protected:
+    // 音频参数
     int mAChannls;
     int mASampleRate ;
     int mABits;
+
+    // 视频参数
     int mVFormat ;
     int mVWidth;
     int mVHeight;
+
+    // 屏幕 View
     void* mNWin ;
 public:
     Render():
@@ -29,10 +34,25 @@ public:
     virtual void setVideoParam(int format , int width , int height ){
         mVFormat = format ; mVWidth = width ; mVHeight = height ;
     }
+    virtual void setPreview(void* native_view) { mNWin = native_view; }
+
+    /*
+     * 解码线程推送解码后的视频和音频
+     * 分别有两个队列/缓冲 如果满的话 就会阻塞
+     */
     virtual void renderAudio(sp<Buffer> buf) = 0;
     virtual void renderVideo(sp<Buffer> buf) = 0;
-    virtual void setPreview(void* native_view) { mNWin = native_view; }
+
+    /*
+     * 1.根据参数(setAudioParam/setVideoParam)创建Ttack和View
+     * 2.启动同步渲染线程
+     */
     virtual void start() = 0 ;
+
+    /*
+     * 1.唤醒等待在 视频/音频 渲染队列的 Decoder deqTh线程
+     * 2.退出同步渲染线程
+     */
     virtual void stop() = 0 ;
     virtual void pause() = 0 ;
 };

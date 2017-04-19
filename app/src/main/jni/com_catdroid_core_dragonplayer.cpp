@@ -45,8 +45,11 @@ static void JNICALL native_prepareAsync(JNIEnv *env, jobject thiz, jlong ctx)
 }
 
 
-static jboolean JNICALL  native_setDisplay(JNIEnv *env, jobject thiz, jlong player_ctx, jobject jSurface )
+static jboolean JNICALL  native_setDisplay(JNIEnv *env, jobject thiz, jlong ctx, jobject jSurface )
 {
+	LOGT(LOG_TAG , "native_prepareAsync %p" , (void*)ctx );
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	jplayer->thizPlayer->setView(env,jSurface);
 	return JNI_TRUE ;
 }
 

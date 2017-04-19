@@ -21,7 +21,7 @@ CLASS_LOG_IMPLEMENT(Player,"Player");
 
 extern JNIDragonPlayer gJNIDragonPlayer ;
 
-Player::Player(JNIEnv* env , jobject jWeakRef):mjObjWeakRef(NULL),
+Player::Player(JNIEnv* env , jobject jWeakRef):mjObjWeakRef(NULL),mWindow(NULL),
                  mDeMuxer(NULL),mVDecoder(NULL),mADecoder(NULL),mRender(NULL),
         mState(STATE::UNINIT),mStop(false),
         mCmdMutex(NULL),mCmdCond(NULL),
@@ -47,6 +47,20 @@ bool Player::setDataSource(std::string uri)
     }
     return true ;
 }
+
+bool Player::setView(JNIEnv* env , jobject surface) {
+    if( mState == UNINIT || mState == INITED){
+        if(mWindow != NULL){
+            TLOGW("duplicate setView, release the older one %p",  mWindow);
+            ANativeWindow_release(mWindow);
+        }
+        mWindow = ANativeWindow_fromSurface(env,surface);
+        return true ;
+    }
+    TLOGE("setView state %s ", stateId2Str(mState));
+    return false ;
+}
+
 
 bool Player::prepare() {
     if(mState == INITED ){
@@ -200,7 +214,7 @@ void Player::loop(void* ctx  )
                                 TLOGE("audio decoder create FAIL !");
                             }
                         }
-                        if( mDeMuxer->getVideoCodecPara() != NULL){
+                        if( mDeMuxer->getVideoCodecPara() != NULL && mWindow != NULL){// 如果没有设置Window不会创建视频解码器
                             TLOGW("source has Video !");
                             mVDecoder = DecoderFactory::create(mDeMuxer->getVideoCodecPara(),
                                                                mDeMuxer->getVideoTimeBase());
@@ -221,13 +235,18 @@ void Player::loop(void* ctx  )
                 if(cmd == EVENT::CMD_PLAY){
 
                     mRender = new RenderThread();
-#define TEST_AUDIO_ONLY
+//#define TEST_AUDIO_ONLY
 
 #ifndef TEST_VIDEO_ONLY
                     if(mADecoder != NULL){
                         mADecoder->setRender(mRender);
                         mADecoder->start();
                         mDeMuxer->setAudioDecoder(mADecoder);
+                        mRender->setAudioParam(
+                                mDeMuxer->getAudioCodecPara()->channels,
+                                mDeMuxer->getAudioCodecPara()->sample_rate,
+                                16 // 我们总是转换成16bit的 S16
+                        );
                     }
 #endif
 #ifndef TEST_AUDIO_ONLY
@@ -235,8 +254,15 @@ void Player::loop(void* ctx  )
                         mVDecoder->start();
                         mVDecoder->setRender(mRender);
                         mDeMuxer->setVideoDecoder(mVDecoder);
+                        mRender->setVideoParam(
+                                12,
+                                mDeMuxer->getVideoCodecPara()->width,
+                                mDeMuxer->getVideoCodecPara()->height);
+                        mRender->setPreview(mWindow);
+
                     }
 #endif
+                    mRender->start();
                     mDeMuxer->play();
 
                     /*

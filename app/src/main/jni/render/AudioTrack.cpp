@@ -323,7 +323,7 @@ bool AudioTrack::setVolume( float volume ) // 0 ~ 1.0
 {
 	float vol = ( volume - 1.0 ) * 1000 * -1 ;
 	SLresult result = (*mIPlayerVolume)->SetVolumeLevel(mIPlayerVolume, vol);// 设置音量  没有区分左右声道 毫分贝
-    return (SL_RESULT_SUCCESS == result) ? true : false ;
+    return SL_RESULT_SUCCESS == result;
 }
 
 bool AudioTrack::setMute( bool mute )
@@ -332,7 +332,7 @@ bool AudioTrack::setMute( bool mute )
     //result = (*mIPlayerMuteSolo)->SetChannelMute(mIPlayerMuteSolo, 1, mute);
 	SLresult result = SL_RESULT_SUCCESS ;
 	result = (*mIPlayerVolume)->SetMute(mIPlayerVolume , mute? SL_BOOLEAN_TRUE: SL_BOOLEAN_FALSE );
-    return (SL_RESULT_SUCCESS == result) ? true : false ;
+    return SL_RESULT_SUCCESS == result;
 }
 
 bool AudioTrack::write(sp<Buffer> buf)

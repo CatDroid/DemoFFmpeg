@@ -8,6 +8,7 @@
 
 #include <string>
 #include <list>
+#include <android/native_window.h>
 #include "Log.h"
 #include "Condition.h"
 
@@ -45,6 +46,7 @@ public:
 
 private:
     jobject mjObjWeakRef ; // 在loop中返回时候释放
+    ANativeWindow* mWindow;
 
     DeMuxer* mDeMuxer ;
     Decoder* mVDecoder ;
@@ -68,6 +70,7 @@ public:
 
     // 外部调用接口
     virtual bool setDataSource(std::string uri);
+    virtual bool setView(JNIEnv* env , jobject surface);
     virtual bool prepare();         // 状态不对 返回false
     virtual void prepareSync();
     virtual bool play();            // 状态不对 返回false

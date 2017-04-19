@@ -452,9 +452,7 @@ void H264SWDecoder::clearupPacketQueue()
 	AutoMutex l(mEnqMux);
 	TLOGI("pending mPktQueue size %lu", mPktQueue.size() );
 	std::list<sp<MyPacket>>::iterator it = mPktQueue.begin();
-	while(it != mPktQueue.end())
-	{
-		*it = NULL;
+	while(it != mPktQueue.end()) {
 		mPktQueue.erase(it++);
 	}
 	TLOGI("clean up AVPacket Done!");
@@ -513,7 +511,7 @@ void H264SWDecoder::deqloop(){
 				// 有些mp4文件是yuv444(ubuntu屏幕录制) yuv422（ubuntu摄像头)
 
 				//TLOGD("video pts decode %ld " , frame->pts );
-//				sp<Buffer> buf = mBufMgr->pop();
+				sp<Buffer> buf = mBufMgr->pop();
 				/**
 				 * 注意:linesize @ AVFrame
 				 * 		For video, 各个平面中的行的大小
@@ -530,14 +528,14 @@ void H264SWDecoder::deqloop(){
 				 *
 				 * 	TODO 如果渲染sharder支持YUV三个平面作为sharder的话 可以不用在这里合并成一片内存
 				 */
-//				av_image_copy_to_buffer(buf->data(),
-//										mDecodedFrameSize ,
-//										(const uint8_t *const *) pFrame->data,
-//										pFrame->linesize ,
-//										mpVidCtx->pix_fmt ,
-//										mpVidCtx->width ,
-//										mpVidCtx->height ,
-//										1);// AVPicture ---> AVFrame
+				av_image_copy_to_buffer(buf->data(),
+										mDecodedFrameSize ,
+										(const uint8_t *const *) pFrame->data,
+										pFrame->linesize ,
+										mpVidCtx->pix_fmt ,
+										mpVidCtx->width ,
+										mpVidCtx->height ,
+										1);// AVPicture ---> AVFrame
 
 //				保存到文件
 //				static WriteFile* testfile = NULL;
@@ -548,20 +546,24 @@ void H264SWDecoder::deqloop(){
 //					TLOGD("write testfile ok");
 //				}
 
-//				buf->pts() = (int64_t) (pFrame->pts * mTimeBase * 1000);  // ms
-//				buf->height() = mpVidCtx->height ;
-//				buf->width() = mpVidCtx->width ;
-//				buf->size() = mDecodedFrameSize ;
-//				buf->fmt() = mpVidCtx->pix_fmt;
+				buf->pts() = (int64_t) (pFrame->pkt_pts * 1000 * 1000 * mTimeBase );  // us
+				buf->height() = mpVidCtx->height ;
+				buf->width() = mpVidCtx->width ;
+				buf->size() = mDecodedFrameSize ;
+				buf->fmt() = mpVidCtx->pix_fmt;
+				mRender->renderVideo(buf);
 				av_frame_unref(pFrame);
-				// TODO 给到渲染线程
-				//mRender->renderVideo()
+
 			}break;
 			case AVERROR_EOF:{
 				// TODO 告诉Player文件已经解码完毕 可能等待渲染结束
 				TLOGW("deqloop 解码器完全清空, 没有更多帧输出.\n");
-				// TODO 告诉渲染线程文件已经结束
-				// mRender->renderVideo(NULL) ;
+				sp<Buffer> buf = mBufMgr->pop();
+				buf->pts() = -1 ;
+				buf->width() = -1 ;
+				buf->width() = -1 ;
+				buf->size() = -1 ; //mark end
+				mRender->renderVideo(buf) ;
 				end = true ;
 			}break;
 			case AVERROR(EAGAIN):{
