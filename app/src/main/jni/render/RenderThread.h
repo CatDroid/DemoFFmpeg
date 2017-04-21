@@ -58,6 +58,8 @@ private:
 
 	// 调试
 	sp<SaveFile> mDebugFile ;
+	int64_t mLastDVTime ;
+	int64_t mLastDATIme ;
 
 public:
 	RenderThread(  );

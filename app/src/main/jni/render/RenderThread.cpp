@@ -13,6 +13,20 @@ CLASS_LOG_IMPLEMENT(RenderThread,"RenderThread");
 #define VIDEO_RENDER_BUFFER_SIZE 30
 #define AUDIO_RENDER_BUFFER_SIZE 46
 
+int64_t getCurTimeMs()
+{
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (uint64_t)(now.tv_sec * 1000UL + now.tv_nsec / 1000000UL);
+}
+
+int64_t getCurTimeUs()
+{
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (uint64_t)(now.tv_sec * 1000UL * 1000UL + now.tv_nsec / 1000UL);
+}
+
 RenderThread::RenderThread(  ):mpTrack(NULL),
 		mpView(NULL),mpSwsCtx(NULL),
 		mSrcFrame(NULL),mDstFrame(NULL),mRGBSize(0),
@@ -20,6 +34,8 @@ RenderThread::RenderThread(  ):mpTrack(NULL),
 		mStartSys(-1),mVidStartPts(-1),mAudStartPts(-1)
 {
 	TLOGT("RenderThread");
+	  mLastDVTime = 0 ;
+	  mLastDATIme = 0 ;
 }
 
 
@@ -93,7 +109,12 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 							  mDstFrame->data, mDstFrame->linesize );
 		// 不需要把AVFrame mDstFrame 进行 av_image_copy_to_buffer 因为RGBA只有一个平面 已经转换到了目标Buffer
 
+		int64_t now  = ::getCurTimeUs();
+		int64_t diff = now - mLastDVTime;// us
+		if( diff > 16000) TLOGE("video decoder too slow ! %" PRId64 " us", diff-16000);
+		mLastDVTime = now ;
 		TLOGT("output slice height %d ,  RGBA height %d " , ret , buf->height() );
+
 		//TLOGD("linesize[0] = %d , mRGBSize = %d " ,mDstFrame->linesize[0] * buf->height() , mRGBSize );
 
 		rgbbuf->width() = buf->width();
@@ -124,19 +145,7 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 }
 
 
-int64_t getCurTimeMs()
-{
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	return (uint64_t)(now.tv_sec * 1000UL + now.tv_nsec / 1000000UL);
-}
 
-int64_t getCurTimeUs()
-{
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	return (uint64_t)(now.tv_sec * 1000UL * 1000UL + now.tv_nsec / 1000UL);
-}
 
 
 void RenderThread::loop()
@@ -184,7 +193,7 @@ void RenderThread::loop()
 			}
 		}
 
-		bool renderAudio = true ;
+
 		int64_t nowus = getCurTimeUs()  ;
 
 		if( mVidStartPts == -1 && vbuf.get() != NULL ) mVidStartPts = vbuf->pts();
@@ -197,70 +206,71 @@ void RenderThread::loop()
 			  vbuf.get() , (vbuf.get()==NULL)?-111:vbuf.get()->pts(),
 			  abuf.get() , (abuf.get()==NULL)?-111:abuf.get()->pts());
 
-		int64_t near_time ;
+		uint8_t rwho = 0 ; // 0:audio 1:video 2:both
+		int64_t delayus = 0 ;
 		if(vbuf.get() != NULL && abuf.get() != NULL ){
-			int64_t play_vtime = mStartSys + ( vbuf->pts() - mVidStartPts );
-			int64_t play_atime = mStartSys + ( abuf->pts() - mAudStartPts ) ;
 
-			if( play_vtime > play_atime){
-				near_time = play_atime ;
-				renderAudio = true ;
+			int64_t delay_vtime = mStartSys + ( vbuf->pts() - mVidStartPts ) - nowus;
+			int64_t delay_atime = mStartSys + ( abuf->pts() - mAudStartPts ) - nowus;
+			if( delay_vtime <= 0 && delay_atime <= 0 ){
+				rwho = 2 ; delayus = (delay_vtime>delay_atime)?delay_atime:delay_vtime ;
+			}else if( delay_vtime < delay_atime){
+				rwho = 1 ; delayus = delay_vtime ;
 			}else{
-				near_time = play_vtime;
-				renderAudio = false ;
+				rwho = 0 ; delayus = delay_atime ;
 			}
-
 		}else if(NULL != vbuf.get()){
-			renderAudio = false ;
-			near_time = mStartSys + ( vbuf->pts() - mVidStartPts ) ;
+			rwho = 1 ;
+			delayus = mStartSys + ( vbuf->pts() - mVidStartPts ) - nowus;
 		}else {
-			renderAudio = true ;
-			near_time = mStartSys + ( abuf->pts() - mVidStartPts ) ;
+			rwho = 0 ;
+			delayus = mStartSys + ( abuf->pts() - mAudStartPts ) - nowus;
 		}
 
 
-		int64_t delayus = near_time - nowus  ;
 
-
-		if( delayus > 5000 ){ // 5ms
+		if( delayus > 1000 ){ // 1ms
 			{
+				TLOGT("wait %" PRId64 , (((uint64_t) delayus - 1000) * 1000));
 				AutoMutex l(mQueMtx);
-				mSrcCond.waitRelative(mQueMtx , (((uint64_t) delayus - 5000) * 1000));
+				mSrcCond.waitRelative(mQueMtx , (((uint64_t) delayus - 1000) * 1000));
 			}
 			continue ;
 		}else if(delayus < -5000 ){
-			TLOGE("%s too lateny %" PRId64 "!" , renderAudio?"a":"v",delayus );
+			TLOGE("%d too lateny %" PRId64 "!" , rwho ,delayus );
 		}
 
 
 		{
 			AutoMutex l(mQueMtx);
-			if(renderAudio){
+			if( rwho == 0 || rwho == 2) {
 				mAudRdrQue.pop_front();
 				mAQueCond.signal();
-			}else{
+			}
+			if( rwho == 1 || rwho == 2 ){
 				mVidRdrQue.pop_front();
 				mVQueCond.signal();
 			}
 		}
 
-		if(renderAudio){
+		if( rwho == 0 || rwho == 2){
 			TLOGD("write audio size %d pts %" PRId64 , abuf->size() , abuf->pts());
 			mpTrack->write(abuf);
-		}else{
+		}
+
+		if( rwho == 1 || rwho == 2 ){
 			TLOGD("draw w %d h %d size %d pts[A:%" PRId64 " V:%" PRId64 " ] A-V %" PRId64 " ms " ,
 				  vbuf->width(), vbuf->height() , vbuf->size() ,
 				  mpTrack->pts() ,  vbuf->pts() , (mpTrack->pts() - vbuf->pts()) );
 			if(mpView == NULL){
 				TLOGW("window is NOT set, but get VIDEO frame!");
 			}else{
-				//int64_t before = getCurTimeUs()  ;
+				int64_t before = getCurTimeUs()  ;
 				//TLOGT("before draw");
 				// Draw相当耗时 在16ms左右 可能跟VSYNC 屏幕刷新60有关
-				mpView->draw(vbuf->data() , (uint32_t) vbuf->size(), (uint32_t) vbuf->width(), (uint32_t) vbuf->height());
-				//TLOGT("after draw %" PRId64 ,(getCurTimeUs()-before) );
+				mpView->draw(vbuf);
+				TLOGT("after draw  %" PRId64 ,(getCurTimeUs()-before) );
 			}
-
 		}
 
 	}
