@@ -22,6 +22,20 @@
 
 void dumpBuffer2Hex(const char* tips , uint8_t* buffer , int size , android_LogPriority level , const char* tag );
 
+inline int64_t getCurTimeMs()
+{
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (uint64_t)(now.tv_sec * 1000UL + now.tv_nsec / 1000000UL);
+}
+
+inline int64_t getCurTimeUs()
+{
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (uint64_t)(now.tv_sec * 1000UL * 1000UL + now.tv_nsec / 1000UL);
+}
+
 
 class WriteFile{
 public:

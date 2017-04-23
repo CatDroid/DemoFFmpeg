@@ -110,7 +110,7 @@ bool H264SWDecoder::init(const AVCodecParameters* para , double timebase )
 	}
 	mDecodedFrameSize = av_image_get_buffer_size(mpVidCtx->pix_fmt , mpVidCtx->width, mpVidCtx->height , 1 );
 
-	mBufMgr = new BufferManager( (uint32_t)mDecodedFrameSize,  30 );
+	mBufMgr = new BufferManager("yuv" , (uint32_t)mDecodedFrameSize,  30 );
 
 
 	{

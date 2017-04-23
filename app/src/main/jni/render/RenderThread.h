@@ -54,7 +54,7 @@ private:
 	Condition mVQueCond ;	// 视频队列已经有空位
 	Condition mAQueCond ;	// 音频队列已经有空位
 	Condition mSrcCond ;	// 有新的数据加入Audio/Video队列
-	sp<BufferManager> mBM;
+	sp<BufferManager> mRgbBm;
 
 	// 调试
 	sp<SaveFile> mDebugFile ;

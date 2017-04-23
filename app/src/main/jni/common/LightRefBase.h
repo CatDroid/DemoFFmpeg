@@ -26,7 +26,7 @@ public:
             delete static_cast<const T*>(this);
         }
     }
-    inline ~LightRefBase() { }
+    virtual inline ~LightRefBase() { }
 
     // Debug Only
     inline int ref_count(){ return mCount ;}

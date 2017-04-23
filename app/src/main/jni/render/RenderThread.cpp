@@ -7,25 +7,14 @@
 #include "RenderThread.h"
 
 #include <sys/prctl.h>
+#include "project_utils.h"
 
 CLASS_LOG_IMPLEMENT(RenderThread,"RenderThread");
 
 #define VIDEO_RENDER_BUFFER_SIZE 30
 #define AUDIO_RENDER_BUFFER_SIZE 46
 
-int64_t getCurTimeMs()
-{
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	return (uint64_t)(now.tv_sec * 1000UL + now.tv_nsec / 1000000UL);
-}
 
-int64_t getCurTimeUs()
-{
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	return (uint64_t)(now.tv_sec * 1000UL * 1000UL + now.tv_nsec / 1000UL);
-}
 
 RenderThread::RenderThread(  ):mpTrack(NULL),
 		mpView(NULL),mpSwsCtx(NULL),
@@ -48,18 +37,13 @@ void RenderThread::renderAudio(sp<Buffer> buf)
 
 	while(!mStop){
 		AutoMutex l(mQueMtx);
-		bool empty = mAudRdrQue.empty();
-		if(empty){
+		if( mAudRdrQue.size() >= AUDIO_RENDER_BUFFER_SIZE  ){
+			TLOGW("too much audio RenderBuffer wait!");
+			mAQueCond.wait(mQueMtx);
+			continue ;
+		}else{
 			mAudRdrQue.push_back(buf);
 			mSrcCond.signal();
-		}else{
-			if( mAudRdrQue.size() >= AUDIO_RENDER_BUFFER_SIZE ){
-				TLOGW("too much audio RenderBuffer wait!");
-				mAQueCond.wait(mQueMtx);
-				continue ;
-			}else{
-				mAudRdrQue.push_back(buf);
-			}
 		}
 		break;
 	}
@@ -76,69 +60,78 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 		mDstFrame = av_frame_alloc();
 
 		mRGBSize = av_image_get_buffer_size( AV_PIX_FMT_RGBA , buf->width(), buf->height(), 1 ); // 1是linesize的对齐align
-		mBM = new BufferManager( mRGBSize,  30 );
-	}
-
-	sp<Buffer> rgbbuf = mBM->pop();
-
-	if(buf == NULL){// End Of File
-		TLOGW("RenderThread get End oF File");
-		rgbbuf = NULL ;
-	}else{
-		/*
-	 	* av_image_xxx 系列 比  avpicture_xxx系列 增加了 linesize的alian对齐参数
-	 	*/
-		av_image_fill_arrays(mSrcFrame->data, mSrcFrame->linesize, buf->data() , (AVPixelFormat)buf->fmt() /*AV_PIX_FMT_YUV420P*/, buf->width(), buf->height(), 1);
-		av_image_fill_arrays(mDstFrame->data, mDstFrame->linesize, rgbbuf->data() , AV_PIX_FMT_RGBA, buf->width(), buf->height(), 1);
-
-		/*
-		 * @param c         上下文 sws_getContext()
-		 * @param srcSlice  数组 包含源slice的各个平面的指针
-		 * @param srcStride 数组 包含源image的各个平面的步幅
-		 * @param srcSliceY 将要处理slice在源image的位置 也就是 image第一行的位置(从0开始)
-		 * @param srcSliceH 源slice的高度, 也就是slice的行数
-		 * @param dst       数组 包含目标image的各个平面的指针
-		 * @param dstStride 数组 包含目标image的各个平面的步幅(大小? stride)
-		 * @return          输出的高度? the height of the output slice
-		 */
-		int ret  = sws_scale( mpSwsCtx,
-							  mSrcFrame->data,
-							  mSrcFrame->linesize,
-							  0,
-							  buf->height(),
-							  mDstFrame->data, mDstFrame->linesize );
-		// 不需要把AVFrame mDstFrame 进行 av_image_copy_to_buffer 因为RGBA只有一个平面 已经转换到了目标Buffer
-
-		int64_t now  = ::getCurTimeUs();
-		int64_t diff = now - mLastDVTime;// us
-		if( diff > 16000) TLOGE("video decoder too slow ! %" PRId64 " us", diff-16000);
-		mLastDVTime = now ;
-		TLOGT("output slice height %d ,  RGBA height %d " , ret , buf->height() );
-
-		//TLOGD("linesize[0] = %d , mRGBSize = %d " ,mDstFrame->linesize[0] * buf->height() , mRGBSize );
-
-		rgbbuf->width() = buf->width();
-		rgbbuf->height() = buf->height() ;
-		rgbbuf->pts() = buf->pts();
-		rgbbuf->size() = mRGBSize ;
+		assert( mRGBSize > 0 );
+		mRgbBm = new BufferManager("rgb", (uint32_t) mRGBSize, VIDEO_RENDER_BUFFER_SIZE );
 	}
 
 
 	while(!mStop){
-		AutoMutex l(mQueMtx);
-		bool empty = mVidRdrQue.empty();
-		if(empty){
-			mVidRdrQue.push_back(rgbbuf);
-			mSrcCond.signal();
-		}else{
-			if( mVidRdrQue.size() >= VIDEO_RENDER_BUFFER_SIZE ){
+		{
+			AutoMutex l(mQueMtx);
+			if( mVidRdrQue.size() >= VIDEO_RENDER_BUFFER_SIZE  ){
 				TLOGW("too much video RenderBuffer wait!");
 				mVQueCond.wait(mQueMtx);
 				continue ;
-			}else{
-				mVidRdrQue.push_back(rgbbuf);
 			}
+			TLOGT("pending Render Queue Size %lu", mVidRdrQue.size( ));
+			//  mVidRdrQue.size() + SurfaceView.mDisBuf.size() == mRgbBm.mTotalBuffers
+			//  如果不能及时显示  SurfaceView.mDisBuf.size()可能增大,
+			//  导致 虽然mVidRdrQue不超过VIDEO_RENDER_BUFFER_SIZE=30 但是 mRgbBm.mTotalBuffers 可能超过 30
+			//  结果内存越来越大 所以要提高SurfaceView.loop的级别为-4
+			//  所以如果内存过大 要检查SurfaceView.mDisBuf的数量
 		}
+
+		sp<Buffer> rgbbuf = mRgbBm->pop();
+
+		if(buf == NULL){// End Of File
+			TLOGW("RenderThread get End oF File");
+			rgbbuf = NULL ;
+		}else{
+			/*
+             * av_image_xxx 系列 比  avpicture_xxx系列 增加了 linesize的alian对齐参数
+             */
+			av_image_fill_arrays(mSrcFrame->data, mSrcFrame->linesize, buf->data() , (AVPixelFormat)buf->fmt() /*AV_PIX_FMT_YUV420P*/, buf->width(), buf->height(), 1);
+			av_image_fill_arrays(mDstFrame->data, mDstFrame->linesize, rgbbuf->data() , AV_PIX_FMT_RGBA, buf->width(), buf->height(), 1);
+
+			/*
+             * @param c         上下文 sws_getContext()
+             * @param srcSlice  数组 包含源slice的各个平面的指针
+             * @param srcStride 数组 包含源image的各个平面的步幅
+             * @param srcSliceY 将要处理slice在源image的位置 也就是 image第一行的位置(从0开始)
+             * @param srcSliceH 源slice的高度, 也就是slice的行数
+             * @param dst       数组 包含目标image的各个平面的指针
+             * @param dstStride 数组 包含目标image的各个平面的步幅(大小? stride)
+             * @return          输出的高度? the height of the output slice
+             */
+			int ret  = sws_scale( mpSwsCtx,
+								  mSrcFrame->data,
+								  mSrcFrame->linesize,
+								  0,
+								  buf->height(),
+								  mDstFrame->data, mDstFrame->linesize );
+			// 不需要把AVFrame mDstFrame 进行 av_image_copy_to_buffer 因为RGBA只有一个平面 已经转换到了目标Buffer
+
+			int64_t now  = ::getCurTimeUs();
+			int64_t diff = now - mLastDVTime;// us
+			if( diff > 16000) TLOGW("video decoder too slow ! %" PRId64 " us", diff-16000);
+			mLastDVTime = now ;// 可能受到这里pending的影响 (mVidRdrQue.size() >= VIDEO_RENDER_BUFFER_SIZE)
+
+			TLOGT("output slice height %d ,  RGBA height %d " , ret , buf->height() );
+
+			//TLOGD("linesize[0] = %d , mRGBSize = %d " ,mDstFrame->linesize[0] * buf->height() , mRGBSize );
+
+			rgbbuf->width() = buf->width();
+			rgbbuf->height() = buf->height() ;
+			rgbbuf->pts() = buf->pts();
+			rgbbuf->size() = mRGBSize ;
+		}
+
+		{
+			AutoMutex l(mQueMtx);
+			mVidRdrQue.push_back(rgbbuf);
+			mSrcCond.signal();
+		}
+
 		break;
 	}
 
@@ -180,9 +173,9 @@ void RenderThread::loop()
 			}
 
 			if(mVidStartPts == -1 || mAudStartPts ==-1 ){
-				if(vbuf.get() == NULL || abuf.get() == NULL ){
+				if(vbuf.get() == NULL || abuf.get() == NULL || mVidRdrQue.size() < 5 /*buffering*/ ){ // VIDEO_RENDER_BUFFER_SIZE
 					// 必须等待视频第一帧过来才开始播放 否者音频会过早播放(音频解码快 而且不像H264这样会有'解码延迟')
-					TLOGW("sync wait for video and audio");
+					TLOGW("sync wait for video and audio, video queue %lu " , mVidRdrQue.size());
 					mSrcCond.wait(mQueMtx);
 					continue ;
 				}
@@ -201,10 +194,11 @@ void RenderThread::loop()
 		if( mStartSys == -1 ) mStartSys = nowus;
 
 
-		TLOGT("vs=%" PRId64 ",as=%" PRId64 ",vbuf=%p(%" PRId64 "),abuf=%p(%" PRId64 ")" ,
+		TLOGT("vs=%" PRId64 ",as=%" PRId64 ",vbuf=%p(%" PRId64 "),abuf=%p(%" PRId64 "),pos=%" PRId64 " us" ,
 			  mVidStartPts , mAudStartPts ,
 			  vbuf.get() , (vbuf.get()==NULL)?-111:vbuf.get()->pts(),
-			  abuf.get() , (abuf.get()==NULL)?-111:abuf.get()->pts());
+			  abuf.get() , (abuf.get()==NULL)?-111:abuf.get()->pts(),
+			  nowus - mStartSys );
 
 		uint8_t rwho = 0 ; // 0:audio 1:video 2:both
 		int64_t delayus = 0 ;
@@ -231,13 +225,13 @@ void RenderThread::loop()
 
 		if( delayus > 1000 ){ // 1ms
 			{
-				TLOGT("wait %" PRId64 , (((uint64_t) delayus - 1000) * 1000));
+				TLOGT("wait %" PRId64 " us" , (((uint64_t) delayus - 1000)  ));
 				AutoMutex l(mQueMtx);
 				mSrcCond.waitRelative(mQueMtx , (((uint64_t) delayus - 1000) * 1000));
 			}
 			continue ;
 		}else if(delayus < -5000 ){
-			TLOGE("%d too lateny %" PRId64 "!" , rwho ,delayus );
+			TLOGE("%d too lateny %" PRId64 " us !" , rwho ,delayus );
 		}
 
 
@@ -259,17 +253,17 @@ void RenderThread::loop()
 		}
 
 		if( rwho == 1 || rwho == 2 ){
-			TLOGD("draw w %d h %d size %d pts[A:%" PRId64 " V:%" PRId64 " ] A-V %" PRId64 " ms " ,
-				  vbuf->width(), vbuf->height() , vbuf->size() ,
+			TLOGD("draw buffer %p w %d h %d size %d pts[A:%" PRId64 " V:%" PRId64 " ] A-V %" PRId64 " us " ,
+				  vbuf.get(), vbuf->width(), vbuf->height() , vbuf->size() ,
 				  mpTrack->pts() ,  vbuf->pts() , (mpTrack->pts() - vbuf->pts()) );
 			if(mpView == NULL){
 				TLOGW("window is NOT set, but get VIDEO frame!");
 			}else{
-				int64_t before = getCurTimeUs()  ;
+//				int64_t before = getCurTimeUs()  ;
 				//TLOGT("before draw");
 				// Draw相当耗时 在16ms左右 可能跟VSYNC 屏幕刷新60有关
 				mpView->draw(vbuf);
-				TLOGT("after draw  %" PRId64 ,(getCurTimeUs()-before) );
+//				TLOGT("after draw  %" PRId64 " us" ,(getCurTimeUs()-before) );
 			}
 		}
 

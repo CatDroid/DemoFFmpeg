@@ -5,12 +5,18 @@
  *      Author: hanlon
  */
 
-#define LOG_TAG "SurfaceView"
 #include "SurfaceView.h"
+
 #include <assert.h>
 #include <sys/prctl.h>
+#include <inttypes.h>
+
+#include "project_utils.h"
 
 CLASS_LOG_IMPLEMENT(SurfaceView,"SurfaceView");
+
+//#define TRACE_SurfaceView 1
+#define MAX_DELAY_DISPLAY_FRAME 2
 
 SurfaceView::SurfaceView(ANativeWindow * window , uint32_t width , uint32_t height ):
 				mpSurface(window),mWidth(width),mHeight(height),mDisThID(-1),mStop(false)
@@ -63,13 +69,22 @@ void* SurfaceView::dispThreadEntry(void *arg)
 	return NULL;
 }
 
+
 void SurfaceView::draw(sp<Buffer> buf){
 
 	if(!mStop){
 		{
 			AutoMutex _l(mDisMux);
+			if(mDisBuf.size() > MAX_DELAY_DISPLAY_FRAME){
+									// 如果经常draw超过16ms就可能出现mDisBuf越来越多 故这里需要丢帧
+				mDisBuf.pop_front();// 这样mRgbBm的 Buffer数目 最大就在 30(RenderThread.mVidRdrQue)+2(MAX_DELAY_DISPLAY_FRAME)
+				TLOGW("too much to display, drop frame ");
+			}
 			mDisBuf.push_back(buf);
 			mDisCon.signal();
+#if TRACE_SurfaceView == 1
+			TLOGT("Display Buffers %lu ", mDisBuf.size() );
+#endif
 		}
 	}else{
 		TLOGT("SurfaceView is Stoped");
@@ -80,8 +95,13 @@ void SurfaceView::loop()
 {
 	TLOGW("SurfaceView loop entry");
 
-	sp<Buffer> next = NULL ;
+	// Process.THREAD_PRIORITY_DISPLAY = -4
+	// SurfaceView线程可能优先级底 不能及时运行 导致Buffer不能及时归还
+	// AudioTrack 是基于OpenSL回调线程优先级是 -16
+	nice(-4);
+
 	while(!mStop){
+		sp<Buffer> next = NULL ;
 		{
 			AutoMutex _l(mDisMux);
 			if(mDisBuf.empty()){
@@ -95,8 +115,19 @@ void SurfaceView::loop()
 		}
 
 		if(next.get()==NULL) continue;
-
+#if TRACE_SurfaceView == 1
+		int64_t before = getCurTimeUs()  ;
+		TLOGT("actual draw buffer %p data %p", next.get() , (void*)next->data() );
+#endif
 		draw(next->data() , (uint32_t) next->size(), (uint32_t) next->width(), (uint32_t) next->height());
+#if TRACE_SurfaceView == 1
+		int64_t cost = (getCurTimeUs()-before);
+		if( cost > 16000 ) {// 16ms 这里耗时可能大于16ms
+			TLOGW("actual draw too long cost %" PRId64 " us" , cost );
+		}else{
+			TLOGT("actual draw cost %" PRId64 " us" , cost );
+		}
+#endif
 	}
 
 	TLOGW("SurfaceView loop exit");

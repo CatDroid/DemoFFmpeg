@@ -135,7 +135,7 @@ bool AACSWDecoder::init(const AVCodecParameters *para, double timebase) {
 		  av_get_sample_fmt_name((AVSampleFormat)mpAudCtx->sample_fmt),
 		  av_get_bytes_per_sample((AVSampleFormat)mpAudCtx->sample_fmt) );
 
-	mBufMgr = new BufferManager(mDecodedFrameSize ,  30 );
+	mBufMgr = new BufferManager("pcm", mDecodedFrameSize ,  30 );
 
 #ifdef SAVE_DECODE_TO_FILE
 	mSaveFile = new SaveFile("/mnt/sdcard/decode.pcm");
