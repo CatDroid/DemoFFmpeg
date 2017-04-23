@@ -44,10 +44,8 @@ private:
 	static void playerCallback(SLAndroidSimpleBufferQueueItf bq, void *context);
 	void playerCallback(SLAndroidSimpleBufferQueueItf bq );
 
-	friend class RenderThread;
-	bool isStoped() { return mStoped ; }
+
 	Condition* mBufCon;
-	Condition* mBufFullCon;
 	Mutex* mBufMux ;
 	std::list<sp<Buffer>> mBuf;
 	bool mStop;

@@ -7,7 +7,7 @@
 
 #define LOG_TAG "AudioTrack"
 
-#include <project_utils.h>
+#include "project_utils.h"
 #include "jni_common.h"
 
 #include "AudioTrack.h"
@@ -19,7 +19,7 @@ AudioTrack::AudioTrack(uint32_t channel, uint32_t sample_rate) : mStop(false), m
 {
 	SLresult result;
 
-	mBufFullCon = new Condition();
+
 	mBufCon = new Condition();
 	mBufMux = new Mutex();
 
@@ -178,13 +178,12 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 		AutoMutex l(mBufMux);
 		if(mBuf.empty()){
 			ALOGD("playerCallback:wait ");
+			if(mStop) continue ;
 			mBufCon->wait(mBufMux);
 			continue ;
 		}else{
-			int size = mBuf.size();
 			playbuf = mBuf.front();
 			mBuf.pop_front();
-			if(size >= AUDIO_RENDER_BUFFER_SIZE ) mBufFullCon->signal();
 			break;
 		}
 	}
@@ -206,7 +205,7 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 	SLAndroidSimpleBufferQueueState state ;
 	(*mIPlayerBufferQueue)->GetState(mIPlayerBufferQueue , &state);
 
-	ALOGD("play Enqueue %d state count %d index %d " , playbuf->size() , state.count , state.index );
+	ALOGD("play %p Enqueue %d state count %d index %d " , playbuf.get() ,playbuf->size() , state.count , state.index );
 	ALOGD("%02x %02x %02x %02x %02x %02x " ,
 		  playbuf->data()[0],
 		  playbuf->data()[1],
@@ -275,7 +274,6 @@ AudioTrack::~AudioTrack()
 		AutoMutex l(mBufMux);
 		mStop = true ;
 		mBufCon->signal();
-		mBufFullCon->signal();
 	}
 
 	SLresult result = (*mIPlayerPlay)->SetPlayState(mIPlayerPlay, SL_PLAYSTATE_STOPPED);
@@ -314,7 +312,6 @@ AudioTrack::~AudioTrack()
 
 	delete mBufMux; mBufMux = NULL;
 	delete mBufCon; mBufCon = NULL;
-	delete mBufFullCon; mBufFullCon = NULL;
 	ALOGD("~AudioTrack delete Audio Track done %p", this );
 
 }
@@ -349,23 +346,11 @@ bool AudioTrack::write(sp<Buffer> buf)
 		return true ;
 	}
 
-	while(!mStop){
+	if(!mStop){
 		AutoMutex l(mBufMux);
 		if( mStop ) return false ;
-		bool empty = mBuf.empty();
-		if(empty){
-			mBuf.push_back(buf);
-			mBufCon->signal(); ALOGD("signal ");
-		}else{
-			if( mBuf.size() >= AUDIO_RENDER_BUFFER_SIZE ){
-				ALOGW("too much audio RenderBuffer wait!");
-				mBufFullCon->wait(mBufMux);
-				continue;
-			}else{
-				mBuf.push_back(buf);
-			}
-		}
-		break;
+		mBuf.push_back(buf);
+		mBufCon->signal();
 	}
 
     return true  ;
