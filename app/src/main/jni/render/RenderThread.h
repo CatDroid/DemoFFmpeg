@@ -46,6 +46,8 @@ private:
 	int64_t mStartSys ;		// 记录第一个视频/音频包播放时的系统启动时间 us
 	int64_t mVidStartPts ;	// 记录第一个视频时间
 	int64_t mAudStartPts ;  // 记录第一个音频时间
+	bool mVBufingDone ;		// 视频解码满 一开始需要先缓冲5帧
+#define VIDEO_BUFFERING_BEFORE_PLAY 5
 
 	// 缓冲队列相关
 	std::list<sp<Buffer>> mAudRdrQue; // Audio Render Queue

@@ -155,18 +155,21 @@ void AACSWDecoder::enqloop(){
 		sp<MyPacket> mypkt = NULL ;
 		AVPacket* packet = NULL;
 
-		AutoMutex l(mEnqMux);
-		if( ! mPktQueue.empty()   )
 		{
-			mypkt = mPktQueue.front();
-			mPktQueue.pop_front();
-			mEnqSrcCnd->signal();
-		}else{
-			if(mStop)break;
-			//TLOGD("Loop:wait for aac avpacket ");
-			mEnqSikCnd->wait(mEnqMux);
-			continue;
+			AutoMutex l(mEnqMux);
+			if( ! mPktQueue.empty()   )
+			{
+				mypkt = mPktQueue.front();
+				mPktQueue.pop_front();
+				mEnqSrcCnd->signal();
+			}else{
+				if(mStop)break;
+				//TLOGD("Loop:wait for aac avpacket ");
+				mEnqSikCnd->wait(mEnqMux);
+				continue;
+			}
 		}
+
 
 		if( mypkt.get() == NULL){
 			TLOGW("End Of file, mark end");
@@ -186,6 +189,7 @@ void AACSWDecoder::enqloop(){
 				TLOGW("End Of file, try send Empty Packet to Decoder");
 				ret = avcodec_send_packet(mpAudCtx,NULL);
 			}else{
+				TLOGT("try to send audio packet ");
 				ret = avcodec_send_packet(mpAudCtx,packet);
 			}
 		}
@@ -209,8 +213,9 @@ void AACSWDecoder::enqloop(){
 				// TODO 两个条件变量
 				// TODO 通知 avcodec_receive_frame 从EAGAIN等待条件变量中 返回
 				// TODO 等待 avcodec_receive_frame 返回EAGAIN 从而唤醒自己
-				TLOGW("enqloop 解码器暂时已满暂停输入\n");
-				usleep(5000);
+				TLOGW("enqloop input full enter \n");
+				usleep(4000);
+				TLOGW("enqloop input full exit \n");
 				if(!mStop) goto TRY_AGAIN ;
 			}break;
 			case AVERROR_EOF:{
@@ -365,8 +370,9 @@ void AACSWDecoder::deqloop(){
 			}break;
 			case AVERROR(EAGAIN):{
 				// TODO 目前只是休眠
-				TLOGW("deqloop 解码器暂时无输出\n");
+				TLOGW("deqloop no output enter \n");
 				usleep(4000);
+				TLOGW("deqloop no output exit \n");
 			}break;
 			case AVERROR(EINVAL):{
 				TLOGE("deqloop 参数错误\n");
@@ -447,7 +453,9 @@ bool AACSWDecoder::put(sp<MyPacket> packet , bool wait ){
 		if( mPktQueue.size() == MAX_PACKET_QUEUE_SIZE ){
 			TLOGW("too much video AVPacket wait!");
 			if(wait){
+				TLOGT("deMuxer wait for AACSWDecoder enter ");
 				mEnqSrcCnd->wait(mEnqMux);
+				TLOGT("deMuxer wait for AACSWDecoder exit ");
 				continue ;
 			}else{
 				return false ; // 不等待
@@ -455,6 +463,7 @@ bool AACSWDecoder::put(sp<MyPacket> packet , bool wait ){
 		}
 		mPktQueue.push_back(packet);
 		mEnqSikCnd->signal();
+		TLOGT("AACSWDecoder pending AVPacket %lu" , mPktQueue.size() );
 		return true ;
 	}
 	return false ;// 已经stop()

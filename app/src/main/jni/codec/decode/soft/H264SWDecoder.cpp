@@ -267,7 +267,9 @@ bool H264SWDecoder::put(sp<MyPacket> packet , bool wait ){
 			// 1.这里阻塞Muxer 等待解码完成
 			// 2.可以不阻塞 立刻返回 采用丢帧方法(需要同步关键帧)
 			if(wait){
+				TLOGT("deMuxer wait for H264SWDecoder enter");
 				mEnqSrcCnd->wait(mEnqMux);
+				TLOGT("deMuxer wait for H264SWDecoder exit");
 				continue ;
 			}else{
 				return false ; // 不等待
@@ -275,6 +277,7 @@ bool H264SWDecoder::put(sp<MyPacket> packet , bool wait ){
 		}
 		mPktQueue.push_back(packet);
 		mEnqSikCnd->signal();
+		TLOGT("H264SWDecoder pending AVPacket %lu" , mPktQueue.size() );
 		return true ;
 	}
 	return false ;// 已经stop()
@@ -300,16 +303,18 @@ void H264SWDecoder::enqloop(){
 		sp<MyPacket> mypkt = NULL ; // 析构时 对AVPacket unref并且返回AVPacket给Muxer的PacketManager
 		AVPacket* avpkt = NULL;
 
-		AutoMutex l(mEnqMux);
-		if( ! mPktQueue.empty()  )
 		{
-			mypkt = mPktQueue.front();
-			mPktQueue.pop_front();
-			mEnqSrcCnd->signal();
-		}else{
-			if(mStop)break; // 在Mutex保护中 应该先检查状态 再等待wait
-			mEnqSikCnd->wait(mEnqMux);
-			continue;
+			AutoMutex l(mEnqMux);
+			if( ! mPktQueue.empty()  )
+			{
+				mypkt = mPktQueue.front();
+				mPktQueue.pop_front();
+				mEnqSrcCnd->signal();
+			}else{
+				if(mStop)break; // 在Mutex保护中 应该先检查状态 再等待wait
+				mEnqSikCnd->wait(mEnqMux);
+				continue;
+			}
 		}
 
 		if( mypkt.get() == NULL){
@@ -371,6 +376,7 @@ void H264SWDecoder::enqloop(){
 				TLOGW("End Of file, try send Empty Packet to Decoder");
 				ret = avcodec_send_packet(mpVidCtx,NULL);
 			}else{
+				TLOGT("try to send video packet ");
 				ret = avcodec_send_packet(mpVidCtx,avpkt);
 			}
 
@@ -391,14 +397,16 @@ void H264SWDecoder::enqloop(){
 				);
 				TLOGT("thread [ count %d type %d active %d ] " , mpVidCtx->thread_count , mpVidCtx->thread_type , mpVidCtx->active_thread_type);
 				TLOGT("enqloop avcodec_send_packet done %" PRId64 "us" , cost.Get() );
-				TLOGT("receive_frame %p send_packet %p " ,  mpVidCtx->codec->receive_frame , mpVidCtx->codec->send_packet );
+				// H264 codec的receive_frame和send_packet都是空的
+				//TLOGT("receive_frame %p send_packet %p " ,  mpVidCtx->codec->receive_frame , mpVidCtx->codec->send_packet );
 			}break;
 			case AVERROR(EAGAIN) :{
 				// TODO 两个条件变量
 				// TODO 通知 avcodec_receive_frame 从EAGAIN等待条件变量中 返回
 				// TODO 等待 avcodec_receive_frame 返回EAGAIN 从而唤醒自己
-				TLOGW("enqloop 解码器暂时已满暂停输入\n");
-				usleep(5000);
+				TLOGW("enqloop input full enter \n");
+				usleep(4000);
+				TLOGW("enqloop input full exit \n");
 				if(!mStop) goto TRY_AGAIN ;
 			}break;
 			case AVERROR_EOF:{
@@ -573,8 +581,9 @@ void H264SWDecoder::deqloop(){
 				// the only guarantee is that an AVERROR(EAGAIN) return value on a send/receive call on one end
 				// implies that a receive/send call on the other end will succeed
 				// 即是: 只保证一端返回AVERROR(EAGAIN)意味另外一端可以返回成功
-				TLOGW("deqloop 解码器暂时无输出\n");
+				TLOGW("deqloop no output enter \n");
 				usleep(4000);
+				TLOGW("deqloop no output exit \n");
 			}break;
 			case AVERROR(EINVAL):{
 				TLOGE("deqloop 参数错误\n");
