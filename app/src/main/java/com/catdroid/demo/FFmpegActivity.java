@@ -11,23 +11,26 @@ import android.media.AudioFormat;
 import android.media.AudioTrack;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Message;
 import android.util.Log;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.widget.Button;
+import android.widget.SeekBar;
 import android.widget.Toast;
 
 public class FFmpegActivity extends Activity {
 
 	private static final String TAG = "FFmpegActivity";
 
+	private SeekBar mSb = null;
 	private SurfaceView mSv = null;
 	private SurfaceHolder mSh = null;
 	private boolean mSurfaceCreated = false;
 
-	private Handler mUIhandler = new Handler();
+	private Handler mUIhandler = new UIEventHandler();
 	private DragonPlayer mPlayer = null;
 
 	private void toastMessage(final String msg) {
@@ -42,10 +45,39 @@ public class FFmpegActivity extends Activity {
 		return this;
 	}
 
+	public class UIEventHandler extends Handler
+	{
+		public final static int EVENT_INIT 			= 0 ;
+		public final static int EVENT_START_VOD  	= 1 ;
+		public final static int EVENT_ING_VOD		= 2 ;
+		public final static int EVENT_UPDATE_VOD 	= 3 ;
+		public final static int EVENT_START_PREVIEW = 4 ;
+		public final static int EVENT_ING_PREVIEW   = 5 ;
+
+		@Override
+		public void handleMessage(Message msg) {
+			switch(msg.what){
+				case EVENT_UPDATE_VOD:
+					if( mPlayer == null ) return ;
+					int position = mPlayer.getCurrentPosition() ;
+					Log.d(TAG , " position = " + position);
+					if(mSb != null) mSb.setProgress(position);
+					sendEmptyMessageDelayed(EVENT_UPDATE_VOD, 1000);
+					break;
+				default:
+					break;
+			}
+			super.handleMessage(msg);
+		}
+	}
+
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_main);
+
+		mSb = (SeekBar) findViewById(R.id.sbSeek);
+		mSb.setOnSeekBarChangeListener( new MySeekBarChangeListener() );
 
 		mSv = (SurfaceView) findViewById(R.id.videoView);
 		mSh = mSv.getHolder();
@@ -60,7 +92,8 @@ public class FFmpegActivity extends Activity {
 					mPlayer = new DragonPlayer();
 					mPlayer.setSurface(mSh.getSurface());
 					//mPlayer.setDataSource("file:///mnt/sdcard/screen_mic_main_r30_g30_ultrafast_c2_44k_6000K_128K_yuv444.mp4");
-					mPlayer.setDataSource("file:///mnt/sdcard/1080p60fps.mp4");
+					//mPlayer.setDataSource("file:///mnt/sdcard/1080p60fps.mp4");
+					mPlayer.setDataSource("file:///mnt/sdcard/wushun.3gp");
 					mPlayer.setOnPreparedListener(new DragonPlayer.OnPreparedListener(){
 						@Override
 						public void onPrepared(DragonPlayer mp, int what) {
@@ -72,6 +105,8 @@ public class FFmpegActivity extends Activity {
 									));
 
 							mp.play();
+							mSb.setMax( mp.getDuration() > 0 ? mp.getDuration() : 0  );
+							mUIhandler.sendEmptyMessageDelayed(UIEventHandler.EVENT_UPDATE_VOD,1000);
 						}
 					});
 					mPlayer.setOnCompletionListener(new DragonPlayer.OnCompletionListener() {
@@ -117,21 +152,54 @@ public class FFmpegActivity extends Activity {
 
 	}
 
+
+	class MySeekBarChangeListener implements SeekBar.OnSeekBarChangeListener
+	{
+		public int last_change = -1 ;
+		@Override
+		public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+			if(fromUser){
+				last_change = progress ;
+			}
+		}
+
+		@Override
+		public void onStartTrackingTouch(SeekBar seekBar) {
+
+		}
+
+		@Override
+		public void onStopTrackingTouch(SeekBar seekBar) {
+			if( last_change != -1){
+				// default progress is 0 ~ 100
+				// after mSb.setMax( mDuration ); progress is 0 ~ mDuration
+				if(mPlayer != null ){
+//					mPlayer.seekTo(last_change);
+//					Log.d(TAG, "seekTo " + last_change );
+				}
+				last_change = -1 ;
+			}
+		}
+	}
+
 	private class SurfaceCallback implements SurfaceHolder.Callback {
 		@Override
 		public void surfaceCreated(SurfaceHolder arg0) {
 			Log.d(TAG, "surfaceCreated created");
 			mSurfaceCreated = true;
 		}
-
 		@Override
 		public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
 			Log.d(TAG, "surfaceChanged " + " format = " + format + " width = " + width + " height = " + height);
 		}
-
 		@Override
 		public void surfaceDestroyed(SurfaceHolder arg0) {
 			Log.d(TAG, "surfaceCreated destroyed");
+			if (mPlayer != null) {
+				mPlayer.stop();
+				mPlayer.release();
+				mPlayer = null;
+			}
 		}
 	}
 
