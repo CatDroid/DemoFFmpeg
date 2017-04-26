@@ -115,7 +115,7 @@ public class DragonPlayer {
 	}
 
 
-	//  Part.3 文件长度和进度信息(非直播,本地回放和远端回放)
+	//  Part.3 文件长度和进度信息(非直播,本地回放和远端回放)(ms)
 	public int getDuration() {
 		return native_getDuration(mPlayerCtx);
 	}

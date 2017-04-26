@@ -77,6 +77,10 @@ public:
     virtual bool pause(); // onPause
     virtual bool seekTo(int32_t ms); // onSeek
     virtual void stop();
+    virtual int32_t getDuration(); // ms
+    virtual int32_t getCurrent();  // ms
+    virtual int32_t getWidth();
+    virtual int32_t getHeigth();
 
     // 内部调用接口
     virtual void prepare_result();

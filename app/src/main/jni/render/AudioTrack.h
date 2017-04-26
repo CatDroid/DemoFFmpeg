@@ -58,7 +58,7 @@ public:
 	bool setVolume( float volume);
 	bool setMute( bool mute );
 	bool write( sp<Buffer> );
-	int64_t pts() const {return mCurrentPts;}
+	int64_t pts() const {return mCurrentPts;} // us
 
 };
 

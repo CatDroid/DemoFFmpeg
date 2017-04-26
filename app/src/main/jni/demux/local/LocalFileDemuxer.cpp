@@ -24,7 +24,7 @@ CLASS_LOG_IMPLEMENT(LocalFileDemuxer,"LocalFileDemuxer");
 LocalFileDemuxer::LocalFileDemuxer(Player* player):DeMuxer(player),
 			mExtractThID(-1),mStop(false),mPause(false),mEof(false),mParseResult(false),
 			mAvFmtCtx(NULL),mVstream(-1),mAstream(-1) ,
-			 mVTimebase(-1),mATimebase(-1)
+			 mVTimebase(-1),mATimebase(-1),mDuration(0)
 {
 	mPm = new PacketManager( 20 );
 
@@ -131,6 +131,9 @@ void LocalFileDemuxer::setupAudioSpec(bool addLeaderCode , unsigned char *data, 
 	memcpy((uint8_t*)mESDS.c_str() + 4, data, size);
 }
 
+int32_t LocalFileDemuxer::getDuration(){
+	return mDuration;
+}
 
 bool LocalFileDemuxer::parseFile() {
 
@@ -229,6 +232,8 @@ bool LocalFileDemuxer::parseFile() {
 			  mAvFmtCtx->duration ,
 			  mAvFmtCtx->duration/1000 );
 
+		mDuration = (int32_t) (mAvFmtCtx->duration / 1000);
+
 		TLOGD("视频流(%d,%d):\n"
 					  "比特率=%" PRId64 "\n"
 					  "帧率=%.2f\n"
@@ -246,6 +251,11 @@ bool LocalFileDemuxer::parseFile() {
 			  pStream->nb_frames,
 			  pStream->duration,  mVTimebase,
 			  pStream->duration * mVTimebase );
+
+		// 时长
+		if( mDuration < pStream->duration * mVTimebase * 1000 /*ms*/ ){
+			mDuration = (int32_t) (pStream->duration * mVTimebase * 1000);
+		}
 
 		uint8_t *src = para->extradata + 5;
 		int extradata_size = para->extradata_size ;
@@ -355,6 +365,11 @@ bool LocalFileDemuxer::parseFile() {
 			  mATimebase,
 			  pStream->duration * mATimebase ,
 			  pStream->nb_frames * para->frame_size * 1.0f / para->sample_rate  );
+
+		// 时长
+		if( mDuration < pStream->duration * mATimebase * 1000 /*ms*/ ){
+			mDuration = (int32_t) (pStream->duration * mATimebase * 1000);
+		}
 
 		//esds
 		uint8_t *src = para->extradata ;

@@ -26,10 +26,12 @@ private:
 	Condition mDisCon;
 	pthread_t mDisThID ;
 	bool mStop ;
+	int64_t mCurrentPts ; // ms
 public:
 	SurfaceView(ANativeWindow * window, uint32_t width , uint32_t height );
 	~SurfaceView();
 	void draw(sp<Buffer>);
+	int64_t pts() const {return mCurrentPts;} // us
 
 private:
 	void loop();

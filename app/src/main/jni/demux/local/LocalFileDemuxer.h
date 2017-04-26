@@ -52,6 +52,7 @@ private:
 	std::string     mESDS;
 	double mVTimebase ;
 	double mATimebase ;
+	int32_t mDuration ;
 
 	Mutex* mStartMutex;
 	Condition* mStartCon;
@@ -68,6 +69,7 @@ public :
 	virtual void prepareAsyn() override ; // player.notify();
 	virtual void play() override ;
 	virtual void pause()override ;
+	virtual int32_t getDuration() override ; // ms
 	virtual void seekTo(int32_t ms) override ;
 	virtual void stop() override;
 	virtual bool getParseResult() override {return mParseResult;}

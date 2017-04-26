@@ -15,7 +15,8 @@
 //#define SAVE_DECODE_TO_FILE
 
 #define AUDIO_RENDER_BUFFER_SIZE 10
-AudioTrack::AudioTrack(uint32_t channel, uint32_t sample_rate) : mStop(false), mStarted(false),mStoped(false)
+AudioTrack::AudioTrack(uint32_t channel, uint32_t sample_rate) :
+		mCurrentPts(0),mStop(false), mStarted(false),mStoped(false)
 {
 	SLresult result;
 

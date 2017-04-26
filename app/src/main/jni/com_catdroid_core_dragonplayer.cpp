@@ -97,11 +97,15 @@ static jboolean JNICALL  native_setMute(JNIEnv *env, jobject thiz, jlong ctx , j
 
 static jint JNICALL native_getDuration(JNIEnv *env, jobject thiz, jlong ctx )
 {
-	return 0 ;
+	LOGT(LOG_TAG , "native_getDuration %p" , (void*)ctx );
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	return jplayer->thizPlayer->getDuration() ;
 }
 static jint JNICALL native_getCurrentPosition(JNIEnv *env, jobject thiz, jlong ctx )
 {
-	return 0 ;
+	LOGT(LOG_TAG , "native_getCurrentPosition %p" , (void*)ctx );
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	return jplayer->thizPlayer->getCurrent();
 }
 
 static jint JNICALL native_getAudioChannel(JNIEnv *env, jobject thiz, jlong ctx )
@@ -118,11 +122,15 @@ static jint JNICALL native_getAudioSampleRate(JNIEnv *env, jobject thiz, jlong c
 }
 static jint JNICALL native_getVideoWidth(JNIEnv *env, jobject thiz, jlong ctx )
 {
-	return 0 ;
+	LOGT(LOG_TAG , "native_getVideoWidth %p" , (void*)ctx );
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	return jplayer->thizPlayer->getWidth();
 }
 static jint JNICALL native_getVideoHeight(JNIEnv *env, jobject thiz, jlong ctx )
 {
-	return 0 ;
+	LOGT(LOG_TAG , "native_getVideoHeight %p" , (void*)ctx );
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	return jplayer->thizPlayer->getHeigth();
 }
 
 static void JNICALL native_subscribeData(JNIEnv *env, jobject thiz, jlong ctx , jint data_type , jboolean isOn)

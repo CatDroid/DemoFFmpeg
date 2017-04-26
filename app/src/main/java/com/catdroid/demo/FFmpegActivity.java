@@ -64,6 +64,13 @@ public class FFmpegActivity extends Activity {
 					mPlayer.setOnPreparedListener(new DragonPlayer.OnPreparedListener(){
 						@Override
 						public void onPrepared(DragonPlayer mp, int what) {
+							Log.d(TAG,String.format("w:%d h:%d d:%d c:%d",
+									mp.getVideoWidth(),
+									mp.getVideoHeight(),
+									mp.getDuration(),
+									mp.getCurrentPosition()
+									));
+
 							mp.play();
 						}
 					});

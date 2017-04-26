@@ -55,6 +55,12 @@ public:
      */
     virtual void stop() = 0 ;
     virtual void pause() = 0 ;
+
+    /*
+     * 1.获得当前播放进度 (ms)
+     * 2.目前是优先使用音频的 没有音频使用视频
+     */
+    virtual int32_t getCurrent() = 0 ;
 };
 
 

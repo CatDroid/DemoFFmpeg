@@ -318,6 +318,16 @@ void RenderThread::start() {
 	}
 }
 
+int32_t RenderThread::getCurrent() {
+	if(mpTrack != NULL ){
+		return (int32_t) (mpTrack->pts() / 1000);
+	}else if(mpView != NULL ){
+		return (int32_t) (mpView->pts() / 1000);
+	}
+	TLOGW("getCurrent Not ");
+	return -1 ;
+
+}
 void RenderThread::pause() {
 	//TODO 暂停播放
 }

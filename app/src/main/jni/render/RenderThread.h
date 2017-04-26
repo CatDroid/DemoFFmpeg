@@ -77,6 +77,7 @@ public:
 	void start() override ;
 	void stop() override ;
 	void pause() override ;
+	int32_t getCurrent() override ;
 
 private:
 	CLASS_LOG_DECLARE(RenderThread);

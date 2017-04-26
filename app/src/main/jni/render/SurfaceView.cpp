@@ -19,7 +19,7 @@ CLASS_LOG_IMPLEMENT(SurfaceView,"SurfaceView");
 #define MAX_DELAY_DISPLAY_FRAME 2
 
 SurfaceView::SurfaceView(ANativeWindow * window , uint32_t width , uint32_t height ):
-				mpSurface(window),mWidth(width),mHeight(height),mDisThID(-1),mStop(false)
+				mpSurface(window),mWidth(width),mHeight(height),mDisThID(-1),mStop(false),mCurrentPts(0)
 {
 	TLOGT("SurfaceView");
 	TLOGD("create view [%d %d] " , mWidth , mHeight);
@@ -120,6 +120,7 @@ void SurfaceView::loop()
 		TLOGT("actual draw buffer %p data %p", next.get() , (void*)next->data() );
 #endif
 		draw(next->data() , (uint32_t) next->size(), (uint32_t) next->width(), (uint32_t) next->height());
+		mCurrentPts = next->pts();
 #if TRACE_SurfaceView == 1
 		int64_t cost = (getCurTimeUs()-before);
 		if( cost > 16000 ) {// 16ms 这里耗时可能大于16ms

@@ -149,6 +149,54 @@ void* Player::sStateMachineTh(void* ctx )
     return NULL;
 }
 
+int32_t Player::getDuration() {// ms
+    if(mState != UNINIT && mState != INITED && mState != PREPARING && mState != ERROR ){
+        return mDeMuxer->getDuration() ;
+    }else{
+        TLOGE("getDuration state %s ", stateId2Str(mState));
+    }
+    return -1 ;
+}
+int32_t Player::getCurrent(){ // ms
+    if(mState != UNINIT && mState != INITED && mState != PREPARING && mState != ERROR ){
+        if(mRender != NULL){
+            return mRender->getCurrent() ;
+        }else{
+            return 0 ;
+        }
+    }else{
+        TLOGE("getCurrent state %s ", stateId2Str(mState));
+    }
+    return -1 ;
+}
+
+int32_t Player::getWidth(){
+    if(mState != UNINIT && mState != INITED && mState != PREPARING && mState != ERROR ){
+        if(mDeMuxer->getVideoCodecPara() == NULL){
+            TLOGW("NO Video");
+            return -1;
+        }
+        return mDeMuxer->getVideoCodecPara()->width ;
+    }else{
+        TLOGE("getWidth state %s ", stateId2Str(mState));
+    }
+    return -1 ;
+}
+
+int32_t Player::getHeigth(){
+    if(mState != UNINIT && mState != INITED && mState != PREPARING && mState != ERROR ){
+        if(mDeMuxer->getVideoCodecPara() == NULL){
+            TLOGW("NO Video");
+            return -1;
+        }
+        return mDeMuxer->getVideoCodecPara()->height ;
+    }else{
+        TLOGE("getHeigth state %s ", stateId2Str(mState));
+    }
+    return -1 ;
+}
+
+
 void Player::loop(void* ctx  )
 {
     JNIEnv* jenv = (JNIEnv*)ctx;
