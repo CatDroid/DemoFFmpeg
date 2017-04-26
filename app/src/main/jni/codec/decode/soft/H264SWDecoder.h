@@ -41,6 +41,9 @@ private:
 	// 线程
 	pthread_t mEnqThID ;
 	pthread_t mDeqThID ;
+//	Mutex mEnqDeqMux ;
+//	Condition mEnqCond;
+//	Condition mDeqCond;
 	bool mStop ;
 
 public:

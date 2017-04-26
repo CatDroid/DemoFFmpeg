@@ -235,6 +235,11 @@ void H264SWDecoder::start( ) {
 void H264SWDecoder::stop() {
 	mStop = true ;
 	if(mEnqThID != -1) {
+//		{
+//			AutoMutex _l(mEnqDeqMux);
+//			mEnqCond.signal();
+//			mDeqCond.signal();
+//		}
 		{
 			AutoMutex l(mEnqMux);
 			mEnqSrcCnd->signal();
@@ -376,6 +381,15 @@ void H264SWDecoder::enqloop(){
 				TLOGW("End Of file, try send Empty Packet to Decoder");
 				ret = avcodec_send_packet(mpVidCtx,NULL);
 			}else{
+				/*
+				 * 耗时点: <49ms@1080P ?? 为什么阻塞??
+				 * ff_thread_decode_frame @ pthread_frame.c 如果没有线程空闲的话,这里会有条件变量等待
+				 * p = &fctx->threads[finished++];
+				 * while (p->state != STATE_INPUT_READY)
+				 * 		pthread_cond_wait
+				 *
+				 * 		ps -t -p 可以看到5个 H264_xxx 线程 都在运行状态
+				 */
 				TLOGT("try to send video packet ");
 				ret = avcodec_send_packet(mpVidCtx,avpkt);
 			}
@@ -395,17 +409,30 @@ void H264SWDecoder::enqloop(){
 					  avpkt->data?avpkt->data[3]:0xFF,
 					  avpkt->data?avpkt->data[4]:0xFF
 				);
+
+				// #define FF_THREAD_FRAME   1 ///< Decode more than one frame at once
+				// #define FF_THREAD_SLICE   2 ///< Decode more than one part of a single frame at once
+				// thread [ count 5 type 3 active 1 ]
 				TLOGT("thread [ count %d type %d active %d ] " , mpVidCtx->thread_count , mpVidCtx->thread_type , mpVidCtx->active_thread_type);
 				TLOGT("enqloop avcodec_send_packet done %" PRId64 "us" , cost.Get() );
 				// H264 codec的receive_frame和send_packet都是空的
 				//TLOGT("receive_frame %p send_packet %p " ,  mpVidCtx->codec->receive_frame , mpVidCtx->codec->send_packet );
+				//usleep(5000);
 			}break;
 			case AVERROR(EAGAIN) :{
 				// TODO 两个条件变量
 				// TODO 通知 avcodec_receive_frame 从EAGAIN等待条件变量中 返回
 				// TODO 等待 avcodec_receive_frame 返回EAGAIN 从而唤醒自己
 				TLOGW("enqloop input full enter \n");
-				usleep(4000);
+				usleep(5000);
+
+//				{
+//					AutoMutex _l(mEnqDeqMux);
+//					if(mStop) break;
+//					mDeqCond.signal();
+//					mEnqCond.wait(mEnqDeqMux);
+//				}
+
 				TLOGW("enqloop input full exit \n");
 				if(!mStop) goto TRY_AGAIN ;
 			}break;
@@ -483,6 +510,7 @@ void H264SWDecoder::deqloop(){
 	while ( !mStop & !end ) {
 		{
 			AutoMutex _l(mSndRcvMux);
+			TLOGT("try to receive video frame");
 			ret = avcodec_receive_frame(mpVidCtx, pFrame); // non-block
 		}
 		switch (ret) {
@@ -569,7 +597,7 @@ void H264SWDecoder::deqloop(){
 				sp<Buffer> buf = mBufMgr->pop();
 				buf->pts() = -1 ;
 				buf->width() = -1 ;
-				buf->width() = -1 ;
+				buf->height() = -1 ;
 				buf->size() = -1 ; //mark end
 				mRender->renderVideo(buf) ;
 				end = true ;
@@ -582,7 +610,13 @@ void H264SWDecoder::deqloop(){
 				// implies that a receive/send call on the other end will succeed
 				// 即是: 只保证一端返回AVERROR(EAGAIN)意味另外一端可以返回成功
 				TLOGW("deqloop no output enter \n");
-				usleep(4000);
+				usleep(5000);
+//				{
+//					AutoMutex _l(mEnqDeqMux);
+//					if(mStop) break;
+//					mEnqCond.signal();
+//					mDeqCond.wait(mEnqDeqMux);
+//				}
 				TLOGW("deqloop no output exit \n");
 			}break;
 			case AVERROR(EINVAL):{
@@ -590,7 +624,7 @@ void H264SWDecoder::deqloop(){
 				// TODO 给Player发送错误事件  Player切换到错误状态 并且反馈给应用层
 			}break;
 			default:{
-
+				TLOGE("unknown error %d ", ret );
 			}break;
 		}
 	}

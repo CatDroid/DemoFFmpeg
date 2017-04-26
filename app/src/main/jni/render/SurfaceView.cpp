@@ -98,7 +98,7 @@ void SurfaceView::loop()
 	// Process.THREAD_PRIORITY_DISPLAY = -4
 	// SurfaceView线程可能优先级底 不能及时运行 导致Buffer不能及时归还
 	// AudioTrack 是基于OpenSL回调线程优先级是 -16
-	nice(-4);
+	//nice(-4);
 
 	while(!mStop){
 		sp<Buffer> next = NULL ;

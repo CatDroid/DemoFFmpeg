@@ -86,16 +86,18 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 
 		sp<Buffer> rgbbuf = mRgbBm->pop();
 
-		if(buf == NULL){// End Of File
-			TLOGW("RenderThread get End oF File");
-			rgbbuf = NULL ;
+		if(buf->size() == -1 ){// 结束时候 H264SWDecoder.cpp往这里放送 =-1 的Buffer
+			TLOGW("RenderThread get End oF File [%d %d %d %" PRId64 "]", buf->width() ,buf->height(),buf->size(),buf->pts());
+			rgbbuf->size() = -1 ;
 		}else{
+			CostHelper cost ;
 			/*
              * av_image_xxx 系列 比  avpicture_xxx系列 增加了 linesize的alian对齐参数
              */
 			av_image_fill_arrays(mSrcFrame->data, mSrcFrame->linesize, buf->data() , (AVPixelFormat)buf->fmt() /*AV_PIX_FMT_YUV420P*/, buf->width(), buf->height(), 1);
 			av_image_fill_arrays(mDstFrame->data, mDstFrame->linesize, rgbbuf->data() , AV_PIX_FMT_RGBA, buf->width(), buf->height(), 1);
 
+			// 耗时点: <21ms@1080P
 			/*
              * @param c         上下文 sws_getContext()
              * @param srcSlice  数组 包含源slice的各个平面的指针
@@ -114,12 +116,12 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 								  mDstFrame->data, mDstFrame->linesize );
 			// 不需要把AVFrame mDstFrame 进行 av_image_copy_to_buffer 因为RGBA只有一个平面 已经转换到了目标Buffer
 
-			int64_t now  = ::getCurTimeUs();
-			int64_t diff = now - mLastDVTime;// us
-			if( diff > 16000) TLOGW("video decoder too slow ! %" PRId64 " us", diff-16000);
-			mLastDVTime = now ;// 可能受到这里pending的影响 (mVidRdrQue.size() >= VIDEO_RENDER_BUFFER_SIZE)
+//			int64_t now  = ::getCurTimeUs();
+//			int64_t diff = now - mLastDVTime;// us
+//			if( diff > 16000) TLOGW("video decoder too slow ! %" PRId64 " us", diff-16000);
+//			mLastDVTime = now ;// 可能受到这里pending的影响 (mVidRdrQue.size() >= VIDEO_RENDER_BUFFER_SIZE)
 
-			TLOGT("output slice height %d ,  RGBA height %d " , ret , buf->height() );
+			TLOGT("output slice height %d ,  RGBA height %d cost %" PRId64 , ret , buf->height(),cost.Get() );
 
 			//TLOGD("linesize[0] = %d , mRGBSize = %d " ,mDstFrame->linesize[0] * buf->height() , mRGBSize );
 
@@ -167,6 +169,7 @@ void RenderThread::loop()
 				if (vbuf->size() == -1 ){
 					vbuf = NULL;
 					video_end = true ;
+					TLOGW("video end");
 				}
 				TLOGT("get Video %lu", mVidRdrQue.size());
 			}
@@ -178,6 +181,7 @@ void RenderThread::loop()
 				if (abuf->size() == -1 ){
 					abuf = NULL;
 					audio_end = true ;
+					TLOGW("audio end");
 				}
 				TLOGT("get Audio %lu", mAudRdrQue.size() );
 			}

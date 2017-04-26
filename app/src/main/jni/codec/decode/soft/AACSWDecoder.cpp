@@ -365,13 +365,13 @@ void AACSWDecoder::deqloop(){
 				sp<Buffer> buf = mBufMgr->pop();
 				buf->pts() = -1 ;
 				buf->size() = -1 ; //mark end
-				mRender->renderVideo(buf) ;
+				mRender->renderAudio(buf) ;
 				end = true ;
 			}break;
 			case AVERROR(EAGAIN):{
 				// TODO 目前只是休眠
 				TLOGW("deqloop no output enter \n");
-				usleep(4000);
+				usleep(8000);
 				TLOGW("deqloop no output exit \n");
 			}break;
 			case AVERROR(EINVAL):{
