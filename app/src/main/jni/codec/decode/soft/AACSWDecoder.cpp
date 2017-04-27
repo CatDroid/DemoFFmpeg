@@ -17,6 +17,8 @@
 
 CLASS_LOG_IMPLEMENT(AACSWDecoder,"AACSWDecoder");
 
+//#define TRACE_DECODE 1
+
 AACSWDecoder::AACSWDecoder():
 		mpAudCtx(NULL),mpSwrCtx(NULL),
 		mDecodedFrameSize(-1),mTimeBase(-1),
@@ -189,7 +191,9 @@ void AACSWDecoder::enqloop(){
 				TLOGW("End Of file, try send Empty Packet to Decoder");
 				ret = avcodec_send_packet(mpAudCtx,NULL);
 			}else{
+#if TRACE_DECODE == 1
 				TLOGT("try to send audio packet ");
+#endif
 				ret = avcodec_send_packet(mpAudCtx,packet);
 			}
 		}
@@ -199,6 +203,7 @@ void AACSWDecoder::enqloop(){
 					TLOGW("End Of file, send Empty Packet to Decoder done");
 					break;
 				}
+#if TRACE_DECODE == 1
 				TLOGD(">[dts %ld pts %ld] %02x %02x %02x %02x %02x" ,
 					  packet->dts,  packet->pts,
 					  (packet->data)?packet->data[0]:0xFF,
@@ -208,14 +213,19 @@ void AACSWDecoder::enqloop(){
 					  (packet->data)?packet->data[4]:0xFF
 				);
 				TLOGT("enqloop avcodec_send_packet done");
+#endif
 			}break;
 			case AVERROR(EAGAIN) :{
 				// TODO 两个条件变量
 				// TODO 通知 avcodec_receive_frame 从EAGAIN等待条件变量中 返回
 				// TODO 等待 avcodec_receive_frame 返回EAGAIN 从而唤醒自己
+#if TRACE_DECODE == 1
 				TLOGW("enqloop input full enter \n");
+#endif
 				usleep(4000);
+#if TRACE_DECODE == 1
 				TLOGW("enqloop input full exit \n");
+#endif
 				if(!mStop) goto TRY_AGAIN ;
 			}break;
 			case AVERROR_EOF:{
@@ -257,7 +267,7 @@ void AACSWDecoder::deqloop(){
 				if (pFrame->pts == AV_NOPTS_VALUE) {
 					pFrame->pts = av_frame_get_best_effort_timestamp(pFrame);
 				}
-
+#if TRACE_DECODE == 1
 				TLOGD("<[pts %" PRId64 " pkt_dts %" PRId64 " pkt_pts %" PRId64 "]"
 									  "目前解码帧数: %d "
 									  "四个平面 %p[%d] %p[%d] %p[%d] %p[%d] "
@@ -286,6 +296,7 @@ void AACSWDecoder::deqloop(){
 				// 实际发现 多个平面 也只有 lineSize[0] 但是 data[0] data[1]都有指针  lineSize[0]/2 才是每个平面的字节数
 					  	  pFrame->nb_samples         // 网络流可能不能确定一个帧包含多少个样本数 解码器会告诉我们这个
 				);
+#endif
 
 				sp<Buffer> buf = mBufMgr->pop();
 				if (mpSwrCtx == NULL) {

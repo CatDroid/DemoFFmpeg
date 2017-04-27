@@ -263,13 +263,17 @@ public class DragonPlayer {
 						mOnCompletionListener.onCompletion(mPlayer);
 					}
 					break;
-
+				// case MEDIA_INFO
+				case MEDIA_INFO_PAUSE_COMPLETED:
+					if(mOnInfoListener != null){
+						mOnInfoListener.onInfo(mPlayer,MEDIA_INFO_PAUSE_COMPLETED,0);
+					}
 				// case MEDIA_ERR:
 				case MEDIA_ERR_SEEK:
 				case MEDIA_ERR_PLAY:
 				case MEDIA_ERR_PREPARE:
 				case MEDIA_ERR_PAUSE:
-
+					break;
 				// case MEDIA_DATA:
 				case MEDIA_DATA:
 					DragonBuffer buffer = (DragonBuffer)msg.obj;

@@ -366,12 +366,19 @@ void Player::loop(void* ctx  )
             case STATE::PAUSING:{
                 if(cmd == EVENT::CMD_PAUSE_COMPLETE){
                     setState(STATE::PAUSED);
+                    mRender->pause();
                     notify(jenv,MEDIA_INFO_PAUSE_COMPLETED);
                 }
-                TLOGW("PAUSING status");
             }break;
             case STATE::PAUSED:{
-                TLOGW("PAUSED status");
+                if(cmd == EVENT::CMD_PLAY){
+                    mDeMuxer->play();
+                    mRender->play();
+                    setState(STATE::PLAYING);
+                }else if(cmd == EVENT::CMD_STOP){
+                    _stop();
+                    mStop = true ; // 退出线程
+                }
             }break;
             case STATE::STOPPING:{
                 TLOGW("STOPPING status");

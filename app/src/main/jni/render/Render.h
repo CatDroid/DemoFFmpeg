@@ -58,6 +58,7 @@ public:
      * 1.唤醒等待在 视频/音频 渲染队列的 Decoder deqTh线程
      * 2.退出同步渲染线程
      */
+    virtual void play() = 0 ; // 第一次启动start()之后play(),类似resume()
     virtual void stop() = 0 ;
     virtual void pause() = 0 ;
 

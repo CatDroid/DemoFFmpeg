@@ -40,6 +40,9 @@ private:
 	int32_t mRGBSize ;
 	// 线程相关
 	volatile  bool mStop ;
+	volatile bool mPause ;
+	Mutex mPauseMutex;
+	Condition mPauseCon;
 	pthread_t mRenderTh;
 
 	// 同步相关
@@ -47,6 +50,8 @@ private:
 	int64_t mVidStartPts ;	// 记录第一个视频时间
 	int64_t mAudStartPts ;  // 记录第一个音频时间
 	bool mVBufingDone ;		// 视频解码满 一开始需要先缓冲5帧
+
+
 #define VIDEO_BUFFERING_BEFORE_PLAY 5
 
 	// 缓冲队列相关
@@ -77,6 +82,7 @@ public:
 	void start() override ;
 	void stop() override ;
 	void pause() override ;
+	void play() override ;
 	int32_t getCurrent() override ;
 
 private:

@@ -22,7 +22,7 @@ extern "C"{
 
 CLASS_LOG_IMPLEMENT(H264SWDecoder,"H264SWDecoder");
 
-
+//#define TRACE_DECODE 1
 
 #define MAX_PACKET_QUEUE_SIZE 20
 H264SWDecoder::H264SWDecoder():
@@ -272,9 +272,13 @@ bool H264SWDecoder::put(sp<MyPacket> packet , bool wait ){
 			// 1.这里阻塞Muxer 等待解码完成
 			// 2.可以不阻塞 立刻返回 采用丢帧方法(需要同步关键帧)
 			if(wait){
+#if TRACE_DECODE == 1
 				TLOGT("deMuxer wait for H264SWDecoder enter");
+#endif
 				mEnqSrcCnd->wait(mEnqMux);
+#if TRACE_DECODE == 1
 				TLOGT("deMuxer wait for H264SWDecoder exit");
+#endif
 				continue ;
 			}else{
 				return false ; // 不等待
@@ -390,7 +394,9 @@ void H264SWDecoder::enqloop(){
 				 *
 				 * 		ps -t -p 可以看到5个 H264_xxx 线程 都在运行状态
 				 */
+#if TRACE_DECODE == 1
 				TLOGT("try to send video packet ");
+#endif
 				ret = avcodec_send_packet(mpVidCtx,avpkt);
 			}
 
@@ -401,6 +407,7 @@ void H264SWDecoder::enqloop(){
 					TLOGW("End Of file, send Empty Packet to Decoder done");
 					break;
 				}
+#if TRACE_DECODE == 1
 				TLOGT(">[dts %ld pts %ld size %d] %02x %02x %02x %02x %02x" ,
 					  avpkt->dts, avpkt->pts, avpkt->size,// 对于H264来说 包含  用4个字节大端表示的NALU大小 + NALU
 					  avpkt->data?avpkt->data[0]:0xFF, // 从AVFormatContext获取 或者 放到AVCodecContext的H264不包含前引导码00000001/000001
@@ -417,13 +424,16 @@ void H264SWDecoder::enqloop(){
 				TLOGT("enqloop avcodec_send_packet done %" PRId64 "us" , cost.Get() );
 				// H264 codec的receive_frame和send_packet都是空的
 				//TLOGT("receive_frame %p send_packet %p " ,  mpVidCtx->codec->receive_frame , mpVidCtx->codec->send_packet );
+#endif
 				//usleep(5000);
 			}break;
 			case AVERROR(EAGAIN) :{
 				// TODO 两个条件变量
 				// TODO 通知 avcodec_receive_frame 从EAGAIN等待条件变量中 返回
 				// TODO 等待 avcodec_receive_frame 返回EAGAIN 从而唤醒自己
+#if TRACE_DECODE == 1
 				TLOGW("enqloop input full enter \n");
+#endif
 				usleep(5000);
 
 //				{
@@ -432,8 +442,9 @@ void H264SWDecoder::enqloop(){
 //					mDeqCond.signal();
 //					mEnqCond.wait(mEnqDeqMux);
 //				}
-
+#if TRACE_DECODE == 1
 				TLOGW("enqloop input full exit \n");
+#endif
 				if(!mStop) goto TRY_AGAIN ;
 			}break;
 			case AVERROR_EOF:{
@@ -510,7 +521,9 @@ void H264SWDecoder::deqloop(){
 	while ( !mStop & !end ) {
 		{
 			AutoMutex _l(mSndRcvMux);
+#if TRACE_DECODE == 1
 			TLOGT("try to receive video frame");
+#endif
 			ret = avcodec_receive_frame(mpVidCtx, pFrame); // non-block
 		}
 		switch (ret) {
@@ -519,9 +532,9 @@ void H264SWDecoder::deqloop(){
 //					pFrame->pts = av_frame_get_best_effort_timestamp(pFrame);
 //				}
 
+#if TRACE_DECODE == 1
 				AVColorSpace cs = av_frame_get_colorspace(pFrame) ; // 目前看都是 AVCOL_SPC_UNSPECIFIED 2
 				AVPixelFormat pixfmt = mpVidCtx->pix_fmt ; // 这个参数重要
-
 				TLOGT("<[pts %" PRId64 " pkt_dts %" PRId64 " pkt_pts %" PRId64 "]"
 						" 颜色空间 %s(%d)  像素格式 %s(%d) "
 						" 是否引用计数 %d 可写 %d "
@@ -541,6 +554,7 @@ void H264SWDecoder::deqloop(){
 					   * pts 经常是 AV_NOPTS_VALUE 所以目前用pkt_pts作为时间戳播放
 					   * */
 				);
+#endif
 				// mVideoCtx->pix_fmt 的可能是
 				//  Codec PixelFormat 0 AV_PIX_FMT_YUV420P
 				//	Codec PixelFormat 5 AV_PIX_FMT_YUV444P
@@ -609,7 +623,9 @@ void H264SWDecoder::deqloop(){
 				// the only guarantee is that an AVERROR(EAGAIN) return value on a send/receive call on one end
 				// implies that a receive/send call on the other end will succeed
 				// 即是: 只保证一端返回AVERROR(EAGAIN)意味另外一端可以返回成功
+#if TRACE_DECODE == 1
 				TLOGW("deqloop no output enter \n");
+#endif
 				usleep(5000);
 //				{
 //					AutoMutex _l(mEnqDeqMux);
@@ -617,7 +633,9 @@ void H264SWDecoder::deqloop(){
 //					mEnqCond.signal();
 //					mDeqCond.wait(mEnqDeqMux);
 //				}
+#if TRACE_DECODE == 1
 				TLOGW("deqloop no output exit \n");
+#endif
 			}break;
 			case AVERROR(EINVAL):{
 				TLOGE("deqloop 参数错误\n");

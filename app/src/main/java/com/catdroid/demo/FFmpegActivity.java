@@ -26,6 +26,7 @@ public class FFmpegActivity extends Activity {
 	private static final String TAG = "FFmpegActivity";
 
 	private SeekBar mSb = null;
+
 	private SurfaceView mSv = null;
 	private SurfaceHolder mSh = null;
 	private boolean mSurfaceCreated = false;
@@ -34,9 +35,11 @@ public class FFmpegActivity extends Activity {
 	private Button mBtnStop = null;
 	private Button mBtnPause = null;
 
-	private Handler mUIhandler = new UIEventHandler();
 	private DragonPlayer mPlayer = null;
+	private boolean mPaused = false ;
 
+
+	private Handler mUIhandler = new UIEventHandler();
 	private void toastMessage(final String msg) {
 		mUIhandler.post(new Runnable() {
 			@Override
@@ -166,6 +169,7 @@ public class FFmpegActivity extends Activity {
 					mPlayer.stop();
 					mPlayer.release();
 					mPlayer = null;
+					mPaused = false ;
 				}else{
 					toastMessage("播放器没有启动");
 				}
@@ -176,7 +180,14 @@ public class FFmpegActivity extends Activity {
 			@Override
 			public void onClick(View v) {
 				if (mPlayer != null) {
-					mPlayer.pause();
+					if(mPaused ){
+						mPlayer.play();
+						mPaused = false ;
+					}else{
+						mPlayer.pause();
+						mPaused = true ;
+					}
+
 				}else{
 					toastMessage("播放器没有启动");
 				}

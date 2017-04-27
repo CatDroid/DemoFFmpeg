@@ -19,7 +19,7 @@ CLASS_LOG_IMPLEMENT(RenderThread,"RenderThread");
 RenderThread::RenderThread(Player* player):Render(player),mpTrack(NULL),
 		mpView(NULL),mpSwsCtx(NULL),
 		mSrcFrame(NULL),mDstFrame(NULL),mRGBSize(0),
-		mStop(false),  mRenderTh(-1),
+		mStop(false), mPause(false), mRenderTh(-1),
 		mStartSys(-1),mVidStartPts(-1),mAudStartPts(-1),mVBufingDone(false)
 {
 	TLOGT("RenderThread");
@@ -146,9 +146,6 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 }
 
 
-
-
-
 void RenderThread::loop()
 {
 	bool audio_end = false ;
@@ -158,7 +155,18 @@ void RenderThread::loop()
 	sp<Buffer> vbuf = NULL;
 	sp<Buffer> abuf = NULL;
 
+	int64_t pause_us = 0   ;
+
 	while( !mStop && !(audio_end&&video_end) ){
+
+		if(mPause){
+			AutoMutex _l(mPauseMutex);
+			if(!mPause) continue ;
+			pause_us = getCurTimeUs() - mStartSys ;// 保存暂停时的进度
+			mPauseCon.wait(mPauseMutex);
+			mStartSys = getCurTimeUs() - pause_us;// 重新计算开始时间
+			continue ;
+		}
 
 		{
 			AutoMutex l(mQueMtx);
@@ -241,7 +249,6 @@ void RenderThread::loop()
 			delayus = mStartSys + ( abuf->pts() - mAudStartPts ) - nowus;
 		}
 
-
 		if( delayus > 1000 ){ // 1ms
 			{
 				TLOGT("wait %" PRId64 " us for %d " ,((uint64_t) delayus - 1000), rwho);
@@ -321,6 +328,7 @@ void RenderThread::start() {
 	}
 }
 
+
 int32_t RenderThread::getCurrent() {
 	if(mpTrack != NULL ){
 		return (int32_t) (mpTrack->pts() / 1000);
@@ -331,14 +339,29 @@ int32_t RenderThread::getCurrent() {
 	return -1 ;
 
 }
+
+void RenderThread::play(){
+	AutoMutex _l(mPauseMutex);
+	mPause = false ;
+	mPauseCon.signal();
+	return ;
+}
+
 void RenderThread::pause() {
-	//TODO 暂停播放
+	AutoMutex _l(mPauseMutex);
+	mPause = true ;
+	return ;
 }
 
 void RenderThread::stop() {
 	TLOGD("RenderThread::stop Enter ");
 	mStop = true ;
 	if( mRenderTh != -1 ){
+		{
+			AutoMutex _l(mPauseMutex);
+			mPause = false ;
+			mPauseCon.signal();
+		}
 		{
 			AutoMutex l(mQueMtx);
 			mAQueCond.signal();
