@@ -62,6 +62,8 @@ static void JNICALL native_play(JNIEnv *env, jobject thiz, jlong ctx )
 static void JNICALL native_pause(JNIEnv *env, jobject thiz, jlong ctx)
 {
 	LOGT(LOG_TAG , "native_pause %p" , (void*)ctx );
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	jplayer->thizPlayer->pause();
 }
 
 static void JNICALL native_seekTo(JNIEnv *env, jobject thiz, jlong ctx , jint msec)

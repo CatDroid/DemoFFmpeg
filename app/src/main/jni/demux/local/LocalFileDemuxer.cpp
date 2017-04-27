@@ -428,6 +428,7 @@ void LocalFileDemuxer::loop()
 		if (mStop) break;
 
 		if( mPause ) {
+			mPlayer->pause_complete();
 			AutoMutex _l(mStartMutex);
 			mStartCon->wait(mStartMutex);
 			continue ;

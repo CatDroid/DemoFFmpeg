@@ -89,7 +89,7 @@ bool Player::play() {
 }
 
 bool Player::pause() {
-    if(mState == PLAYING || mState == PAUSED){
+    if(mState == PLAYING){
         sendEvent(EVENT::CMD_PAUSE);
         return true ;
     }
@@ -109,7 +109,7 @@ bool Player::seekTo(int32_t ms) {
 }
 
 void Player::stop() {
-    if(mState == PLAYING || mState == PAUSED){
+    if(mState == PLAYING || mState == PAUSED || mState == COMPLETE){
         sendEvent(CMD_STOP);
     }else{
         TLOGE("stop state %s ", stateId2Str(mState));
@@ -117,8 +117,16 @@ void Player::stop() {
 }
 
 // 内部接口
-void Player::prepare_result() { // 来自Demuxer
+void Player::prepare_result() {
     sendEvent( EVENT::CMD_PREPARE_RESULT );
+}
+
+void Player::play_complete() {
+    sendEvent( EVENT::CMD_PLAY_COMPLETE );
+}
+
+void Player::pause_complete(){
+    sendEvent( EVENT::CMD_PAUSE_COMPLETE);
 }
 
 Player::~Player()
@@ -282,7 +290,7 @@ void Player::loop(void* ctx  )
             case STATE::PREPARED:{
                 if(cmd == EVENT::CMD_PLAY){
 
-                    mRender = new RenderThread();
+                    mRender = new RenderThread(this);
 //#define TEST_AUDIO_ONLY
 
 #ifndef TEST_VIDEO_ONLY
@@ -340,47 +348,26 @@ void Player::loop(void* ctx  )
             case STATE::PLAYING:{
 
                 if(cmd == EVENT::CMD_PAUSE){
-                    // TODO
                     setState(STATE::PAUSING);
+                    mDeMuxer->pause();
                     pass = true ;
                 }else if(cmd == EVENT::CMD_PLAY){
-                    // Play And Play again
+                    TLOGE("Play And Play again");
                     // TODO onNotify
                     pass = true ;
                 }else if(cmd == EVENT::CMD_PLAY_COMPLETE){
-
+                    setState(STATE::COMPLETE);
+                    notify(jenv,MEDIA_PLAY_COMPLETED);
                 }else if(cmd == EVENT::CMD_STOP){
-                    setState(STATE::STOPPING);
-                    // 调用顺序 应该是 Render --> Decorder --> DeMuxer 因为后者可能挂在前者的缓冲队列上
-                    if(mRender != NULL ){
-                        TLOGW("call Render stop");
-                        mRender->stop();
-                    }
-                    if(mADecoder != NULL){
-                        TLOGW("call ADecorder stop");
-                        mADecoder->stop();
-                    }
-                    if(mVDecoder != NULL){
-                        TLOGW("call VDecorder stop");
-                        mVDecoder->stop();
-                    }
-                    if(mDeMuxer != NULL){
-                        TLOGW("call DeMuxer stop");
-                        mDeMuxer->stop();
-                    }
-
-                    // TODO 支持stop之后重新play的话 这里只需要析构Decoder和Render 保留Demuxer
-                    delete mRender  ;   mRender = NULL;
-                    delete mADecoder;   mADecoder = NULL;
-                    delete mVDecoder;   mVDecoder = NULL;
-                    delete mDeMuxer ;   mDeMuxer = NULL;
-
-                    setState(STATE::STOPPED);
-
+                    _stop();
                     mStop = true ; // 退出线程
                 }
             }break;
             case STATE::PAUSING:{
+                if(cmd == EVENT::CMD_PAUSE_COMPLETE){
+                    setState(STATE::PAUSED);
+                    notify(jenv,MEDIA_INFO_PAUSE_COMPLETED);
+                }
                 TLOGW("PAUSING status");
             }break;
             case STATE::PAUSED:{
@@ -398,8 +385,14 @@ void Player::loop(void* ctx  )
             case STATE::ERROR:{
                 TLOGW("ERROR status");
             }break;
+            case STATE::COMPLETE:{
+                if(cmd == EVENT::CMD_STOP){
+                    _stop();
+                    mStop = true ; // 退出线程
+                }
+            }
             default:{
-                TLOGW("unknown status");
+                TLOGW("unknown status %d " , mState);
             }break;
         }
 
@@ -415,6 +408,32 @@ void Player::loop(void* ctx  )
 
 }
 
+void Player::_stop(){
+    setState(STATE::STOPPING);
+    // 调用顺序 应该是 Render --> Decorder --> DeMuxer 因为后者可能挂在前者的缓冲队列上
+    if(mRender != NULL ){
+        TLOGW("call Render stop");
+        mRender->stop();
+    }
+    if(mADecoder != NULL){
+        TLOGW("call ADecorder stop");
+        mADecoder->stop();
+    }
+    if(mVDecoder != NULL){
+        TLOGW("call VDecorder stop");
+        mVDecoder->stop();
+    }
+    if(mDeMuxer != NULL){
+        TLOGW("call DeMuxer stop");
+        mDeMuxer->stop();
+    }
+    // TODO 支持stop之后重新play的话 这里只需要析构Decoder和Render 保留Demuxer
+    delete mRender  ;   mRender = NULL;
+    delete mADecoder;   mADecoder = NULL;
+    delete mVDecoder;   mVDecoder = NULL;
+    delete mDeMuxer ;   mDeMuxer = NULL;
+    setState(STATE::STOPPED);
+}
 void Player::notify(JNIEnv *env, int type, int arg1 , int arg2, void *obj)
 {
     env->CallStaticVoidMethod(
@@ -458,6 +477,8 @@ const char* const Player::stateId2Str(STATE id)
             return "SEEKING";
         case ERROR:
             return "ERROR";
+        case COMPLETE:
+            return "COMPLETE";
         default:
             return "DEFAULT";
     }

@@ -64,7 +64,7 @@ private:
 	int64_t mLastDATIme ;
 
 public:
-	RenderThread(  );
+	RenderThread(Player* player );
 	virtual  ~RenderThread() ;
 
 	void loop();

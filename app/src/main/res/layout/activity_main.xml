@@ -16,7 +16,7 @@
         />
 
     <Button
-        android:text="Stop"
+        android:text="停止"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_below="@+id/bPlay"
@@ -29,10 +29,10 @@
         android:id="@+id/bPlay"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Play"
+        android:text="播放"
         android:layout_alignParentTop="true"
         android:layout_alignParentStart="true"
-        android:layout_marginTop="11dp" />
+        android:layout_marginTop="15dp" />
 
     <SeekBar
         android:layout_width="wrap_content"
@@ -41,5 +41,14 @@
         android:layout_alignParentStart="true"
         android:id="@+id/sbSeek"
         android:layout_alignParentEnd="true" />
+
+    <Button
+        android:text="暂停"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/bStop"
+        android:layout_alignParentStart="true"
+        android:layout_marginTop="15dp"
+        android:id="@+id/bPause" />
 
 </RelativeLayout>

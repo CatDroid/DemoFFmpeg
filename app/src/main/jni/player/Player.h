@@ -31,6 +31,7 @@ public:
         STOPPED,
         STOPPING,
         SEEKING,
+        COMPLETE,
         ERROR,
     };
     enum EVENT{
@@ -39,6 +40,7 @@ public:
         CMD_PREPARE_RESULT,
         CMD_PLAY,
         CMD_PAUSE,
+        CMD_PAUSE_COMPLETE,
         CMD_SEEK,
         CMD_STOP,
         CMD_PLAY_COMPLETE,
@@ -83,10 +85,16 @@ public:
     virtual int32_t getHeigth();
 
     // 内部调用接口
-    virtual void prepare_result();
+    virtual void prepare_result();  //  Muxer
+    virtual void pause_complete();  //  Muxer
+    virtual void play_complete();   //  Render
+
 
     // 通知应用层接口
     void notify(JNIEnv *env, int type, int arg1 = 0 , int arg2 = 0 , void *obj = NULL);
+
+    // 内部接口
+    void _stop();
 
 private:
     static void* sStateMachineTh(void*);

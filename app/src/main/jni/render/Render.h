@@ -6,11 +6,15 @@
 #define DEMO_FFMPEG_AS_RENDER_H
 
 
+#include "Player.h"
 #include "Buffer.h"
 
 class Render {
 
 protected:
+    // 引用Player对象
+    Player* mPlayer ;
+
     // 音频参数
     int mAChannls;
     int mASampleRate ;
@@ -23,8 +27,9 @@ protected:
 
     // 屏幕 View
     void* mNWin ;
+
 public:
-    Render():
+    Render(Player* player):mPlayer(player),
             mAChannls(-1),mASampleRate(-1),mABits(-1),
             mVFormat(-1),mVWidth(-1),mVHeight(-1){}
     virtual ~Render() {} ;

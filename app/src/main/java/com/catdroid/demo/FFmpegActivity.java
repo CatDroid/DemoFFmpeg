@@ -30,6 +30,10 @@ public class FFmpegActivity extends Activity {
 	private SurfaceHolder mSh = null;
 	private boolean mSurfaceCreated = false;
 
+	private Button mBtnPlay = null;
+	private Button mBtnStop = null;
+	private Button mBtnPause = null;
+
 	private Handler mUIhandler = new UIEventHandler();
 	private DragonPlayer mPlayer = null;
 
@@ -83,7 +87,11 @@ public class FFmpegActivity extends Activity {
 		mSh = mSv.getHolder();
 		mSh.addCallback(new SurfaceCallback());
 
-		((Button) findViewById(R.id.bPlay)).setOnClickListener(new View.OnClickListener() {
+		mBtnPlay = (Button)findViewById(R.id.bPlay);
+		mBtnPause = (Button)findViewById(R.id.bPause);
+		mBtnStop = (Button)findViewById(R.id.bStop);
+
+		mBtnPlay.setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View v) {
 
@@ -92,7 +100,8 @@ public class FFmpegActivity extends Activity {
 					mPlayer = new DragonPlayer();
 					mPlayer.setSurface(mSh.getSurface());
 					//mPlayer.setDataSource("file:///mnt/sdcard/screen_mic_main_r30_g30_ultrafast_c2_44k_6000K_128K_yuv444.mp4");
-					mPlayer.setDataSource("file:///mnt/sdcard/1080p60fps.mp4");
+					//mPlayer.setDataSource("file:///mnt/sdcard/1080p60fps.mp4");
+					mPlayer.setDataSource("file:///mnt/sdcard/test.3gp");
 					mPlayer.setOnPreparedListener(new DragonPlayer.OnPreparedListener(){
 						@Override
 						public void onPrepared(DragonPlayer mp, int what) {
@@ -126,6 +135,20 @@ public class FFmpegActivity extends Activity {
 							return true ;
 						}
 					});
+					mPlayer.setOnInfoListener(new DragonPlayer.OnInfoListener(){
+						@Override
+						public boolean onInfo(DragonPlayer mp, int what, int extra) {
+
+							if(what == DragonPlayer.MEDIA_INFO_PAUSE_COMPLETED){
+								String msg = "已经暂停" ;
+								toastMessage( msg); Log.w(TAG,msg);
+							}else{
+								String msg = "播放信息 : " + what ;
+							}
+
+							return false;
+						}
+					});
 					mPlayer.prepareAsync();
 				} else {
 					toastMessage("请先关闭再重新启动");
@@ -136,16 +159,27 @@ public class FFmpegActivity extends Activity {
 			}
 		});
 
-		((Button) findViewById(R.id.bStop)).setOnClickListener(new View.OnClickListener() {
+		mBtnStop.setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View v) {
-			if (mPlayer != null) {
-				mPlayer.stop();
-				mPlayer.release();
-				mPlayer = null;
-			}else{
-				toastMessage("播放器没有启动");
+				if (mPlayer != null) {
+					mPlayer.stop();
+					mPlayer.release();
+					mPlayer = null;
+				}else{
+					toastMessage("播放器没有启动");
+				}
 			}
+		});
+
+		mBtnPause.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				if (mPlayer != null) {
+					mPlayer.pause();
+				}else{
+					toastMessage("播放器没有启动");
+				}
 			}
 		});
 

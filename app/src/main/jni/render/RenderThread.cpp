@@ -16,7 +16,7 @@ CLASS_LOG_IMPLEMENT(RenderThread,"RenderThread");
 
 
 
-RenderThread::RenderThread(  ):mpTrack(NULL),
+RenderThread::RenderThread(Player* player):Render(player),mpTrack(NULL),
 		mpView(NULL),mpSwsCtx(NULL),
 		mSrcFrame(NULL),mDstFrame(NULL),mRGBSize(0),
 		mStop(false),  mRenderTh(-1),
@@ -170,6 +170,7 @@ void RenderThread::loop()
 					vbuf = NULL;
 					video_end = true ;
 					TLOGW("video end");
+					continue;
 				}
 				TLOGT("get Video %lu", mVidRdrQue.size());
 			}
@@ -182,6 +183,7 @@ void RenderThread::loop()
 					abuf = NULL;
 					audio_end = true ;
 					TLOGW("audio end");
+					continue;
 				}
 				TLOGT("get Audio %lu", mAudRdrQue.size() );
 			}
@@ -277,7 +279,8 @@ void RenderThread::loop()
 	}
 
 	if(video_end && audio_end ){
-		//TODO 通知应用层播放完毕
+		TLOGW("play complete");
+		mPlayer->play_complete();
 	}
 
 //	if(mpTrack == NULL) return ; // TODO
