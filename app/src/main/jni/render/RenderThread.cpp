@@ -243,6 +243,7 @@ void RenderThread::loop()
 					mSrcCond.wait(mQueMtx);
 					continue ;
 				}
+				TLOGW("Buffing Done ! start video %" PRId64 " audio %" PRId64 , vbuf->pts() , abuf->pts() );
 				mVBufingDone = true;
 			}
 			if(vbuf.get() == NULL && abuf.get() == NULL ){

@@ -17,7 +17,7 @@
 
 CLASS_LOG_IMPLEMENT(AACSWDecoder,"AACSWDecoder");
 
-#define TRACE_DECODE 1
+//#define TRACE_DECODE 1
 
 AACSWDecoder::AACSWDecoder():
 		mpAudCtx(NULL),mpSwrCtx(NULL),
@@ -152,6 +152,7 @@ void AACSWDecoder::enqloop(){
 
 	int ret = 0 ;
 	bool end = false ;
+	bool flush = false ;
 
 	while( ! mStop && ! end  ){
 		sp<MyPacket> mypkt = NULL ;
@@ -161,6 +162,7 @@ void AACSWDecoder::enqloop(){
 			AutoMutex l(mEnqMux);
 			if( ! mPktQueue.empty()   )
 			{
+				flush = mFlush2;
 				mypkt = mPktQueue.front();
 				mPktQueue.pop_front();
 				mEnqSrcCnd->signal();
@@ -191,9 +193,8 @@ void AACSWDecoder::enqloop(){
 				TLOGW("End Of file, try send Empty Packet to Decoder");
 				ret = avcodec_send_packet(mpAudCtx,NULL);
 			}else{
-				if(mFlush2){
-					TLOGW("mFlush2 = true drop packet %" PRId64 , packet->pts );
-					mFlush2 = false ;
+				if(mFlush2 != flush ){
+					TLOGW("mFlush2 inverse drop packet %" PRId64 , packet->pts );
 					continue ;
 				}
 
@@ -470,12 +471,13 @@ void AACSWDecoder::flush() {
 		TLOGW("clear pkt queue %lu" , mPktQueue.size() );
 		mPktQueue.clear();
 		mFlush = true ;
+		mFlush2 = !mFlush2 ;
 		mEnqSrcCnd->signal();
 	}
 	{
 		AutoMutex __l(mSndRcvMux);
 		TLOGW("avcodec_flush_buffers");
-		mFlush2 = true ;
+
 		avcodec_flush_buffers(mpAudCtx);// 如果是同步到IDR帧,还需要清空??
 	}
 	mRender->flush(false);

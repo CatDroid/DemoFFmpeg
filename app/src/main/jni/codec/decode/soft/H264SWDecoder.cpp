@@ -22,7 +22,7 @@ extern "C"{
 
 CLASS_LOG_IMPLEMENT(H264SWDecoder,"H264SWDecoder");
 
-#define TRACE_DECODE 1
+//#define TRACE_DECODE 1
 
 #define MAX_PACKET_QUEUE_SIZE 20
 H264SWDecoder::H264SWDecoder():
@@ -269,11 +269,11 @@ void H264SWDecoder::flush() {
 		TLOGW("clear pkt queue %lu" , mPktQueue.size() );
 		mPktQueue.clear();
 		mFlush = true ;
+		mFlush2 = !mFlush2 ;
 		mEnqSrcCnd->signal();
 	}
 	{
 		AutoMutex __l(mSndRcvMux);
-		mFlush2 = true ;
 		TLOGW("avcodec_flush_buffers");
 		avcodec_flush_buffers(mpVidCtx);// 如果是同步到IDR帧,还需要清空??
 	}
@@ -319,8 +319,6 @@ bool H264SWDecoder::put(sp<MyPacket> packet , bool wait ){
 void H264SWDecoder::enqloop(){
 
 //	AVFrame *frame = av_frame_alloc();
-
-
 //	AVPacket endpack = { // 空包 , 使用avcodec_send_packet的话直接avcodec_send_packet(ctx,NULL);
 //			.data = NULL ,
 //			.size = 0,
@@ -330,6 +328,7 @@ void H264SWDecoder::enqloop(){
 
 	int ret = 0 ;
 	bool end = false ; // 如果DeMuxer往队列发送空包 那么表示文件结束
+	bool flush = false ;
 	while( ! mStop && ! end ){
 
 		sp<MyPacket> mypkt = NULL ; // 析构时 对AVPacket unref并且返回AVPacket给Muxer的PacketManager
@@ -337,6 +336,11 @@ void H264SWDecoder::enqloop(){
 
 		{
 			AutoMutex l(mEnqMux);
+			flush = mFlush2 ;
+			// 保留获取时mFlush2状态
+			// 如果avcodec_send_packet时mFlush2状态改变了 说明调用了flush 这个包是旧包
+			// 后面可以改变序号
+			// 如果改为 在avcodec_send_packet成功后 才把packet从队列移除 可以不用mFlush2 但是需要mutex多一次(1.判断是否有packet 2.从队列移除packet)
 			if( ! mPktQueue.empty()  )
 			{
 				mypkt = mPktQueue.front();
@@ -408,9 +412,8 @@ void H264SWDecoder::enqloop(){
 				TLOGW("End Of file, try send Empty Packet to Decoder");
 				ret = avcodec_send_packet(mpVidCtx,NULL);
 			}else{
-				if(mFlush2){
-					TLOGW("mFlush2 = true drop packet %" PRId64 , avpkt->pts );
-					mFlush2 = false ;
+				if(flush != mFlush2){
+					TLOGW("mFlush2 inverse drop packet %" PRId64 , avpkt->pts );
 					continue ;
 				}
 
