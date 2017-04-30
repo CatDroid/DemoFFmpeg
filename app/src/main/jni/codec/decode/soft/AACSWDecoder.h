@@ -49,6 +49,8 @@ private:
 
 	// 线程
 	bool mStop ;
+	bool mFlush;
+	bool mFlush2;
 	pthread_t mEnqThID ;
 	pthread_t mDeqThID ;
 
@@ -63,6 +65,7 @@ public:
 	void start() override ;
 	void stop() override ;
 	bool put(sp<MyPacket> packet, bool wait) override ;
+	void flush() override  ;
 
 private:
 	// 线程

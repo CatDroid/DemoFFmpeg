@@ -17,13 +17,13 @@
 
 CLASS_LOG_IMPLEMENT(AACSWDecoder,"AACSWDecoder");
 
-//#define TRACE_DECODE 1
+#define TRACE_DECODE 1
 
 AACSWDecoder::AACSWDecoder():
 		mpAudCtx(NULL),mpSwrCtx(NULL),
 		mDecodedFrameSize(-1),mTimeBase(-1),
 		mEnqMux(NULL),mEnqSikCnd(NULL),mEnqSrcCnd(NULL),
-		mStop(false),mEnqThID(-1),mDeqThID(-1) {
+		mStop(false),mFlush(false),mFlush2(false),mEnqThID(-1),mDeqThID(-1) {
 	TLOGT("AACSWDecoder");
 }
 
@@ -191,6 +191,12 @@ void AACSWDecoder::enqloop(){
 				TLOGW("End Of file, try send Empty Packet to Decoder");
 				ret = avcodec_send_packet(mpAudCtx,NULL);
 			}else{
+				if(mFlush2){
+					TLOGW("mFlush2 = true drop packet %" PRId64 , packet->pts );
+					mFlush2 = false ;
+					continue ;
+				}
+
 #if TRACE_DECODE == 1
 				TLOGT("try to send audio packet ");
 #endif
@@ -458,15 +464,41 @@ void AACSWDecoder::stop()
 }
 
 
+void AACSWDecoder::flush() {
+	{
+		AutoMutex l(mEnqMux);
+		TLOGW("clear pkt queue %lu" , mPktQueue.size() );
+		mPktQueue.clear();
+		mFlush = true ;
+		mEnqSrcCnd->signal();
+	}
+	{
+		AutoMutex __l(mSndRcvMux);
+		TLOGW("avcodec_flush_buffers");
+		mFlush2 = true ;
+		avcodec_flush_buffers(mpAudCtx);// 如果是同步到IDR帧,还需要清空??
+	}
+	mRender->flush(false);
+}
+
 bool AACSWDecoder::put(sp<MyPacket> packet , bool wait ){
 	while(!mStop){
 		AutoMutex l(mEnqMux);
 		if( mPktQueue.size() == MAX_PACKET_QUEUE_SIZE ){
 			TLOGW("too much video AVPacket wait!");
 			if(wait){
+#if TRACE_DECODE == 1
 				TLOGT("deMuxer wait for AACSWDecoder enter ");
+#endif
+				mFlush = false ;
 				mEnqSrcCnd->wait(mEnqMux);
+				if(mFlush){
+					TLOGW("flush drop old pending packet pts %" PRId64 , packet->pts() );
+					return true ;// drop old
+				}
+#if TRACE_DECODE == 1
 				TLOGT("deMuxer wait for AACSWDecoder exit ");
+#endif
 				continue ;
 			}else{
 				return false ; // 不等待
@@ -474,7 +506,7 @@ bool AACSWDecoder::put(sp<MyPacket> packet , bool wait ){
 		}
 		mPktQueue.push_back(packet);
 		mEnqSikCnd->signal();
-		TLOGT("AACSWDecoder pending AVPacket %lu" , mPktQueue.size() );
+		TLOGT("pending AVPacket %lu" , mPktQueue.size() );
 		return true ;
 	}
 	return false ;// 已经stop()

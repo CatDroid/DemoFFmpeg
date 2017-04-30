@@ -29,13 +29,15 @@ public:
 
     // 控制
     virtual bool setDataSource(std::string path) { mUri = path; return true ; }
-    virtual void prepareAsyn() = 0 ; // player.notify();
+    virtual void prepareAsyn() = 0 ;
+    virtual bool getParseResult() = 0 ;
     virtual void play() = 0 ;
     virtual void pause()= 0 ;
     virtual int32_t getDuration() = 0 ;
     virtual void seekTo(int32_t ms) = 0 ;
+    virtual bool getSeekResult() = 0 ;
     virtual void stop() = 0 ;
-    virtual bool getParseResult() = 0 ;
+
 
     // 消费者
     virtual void setAudioDecoder(Decoder* codec) { mADecoder = codec ;}

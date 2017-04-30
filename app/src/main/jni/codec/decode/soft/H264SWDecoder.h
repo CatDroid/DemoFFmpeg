@@ -45,6 +45,8 @@ private:
 //	Condition mEnqCond;
 //	Condition mDeqCond;
 	bool mStop ;
+	bool mFlush ;
+	bool mFlush2 ;
 
 public:
 	H264SWDecoder();
@@ -55,6 +57,7 @@ public:
 	void start() override ;
 	void stop() override ;
 	bool put(sp<MyPacket> packet, bool wait) override ;
+	void flush() override ;
 
 private:
 	// 线程

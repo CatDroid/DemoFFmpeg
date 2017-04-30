@@ -69,6 +69,13 @@ static void JNICALL native_pause(JNIEnv *env, jobject thiz, jlong ctx)
 static void JNICALL native_seekTo(JNIEnv *env, jobject thiz, jlong ctx , jint msec)
 {
 	LOGT(LOG_TAG , "native_seekTo %p" , (void*)ctx );
+	JNIPlayer* jplayer = (JNIPlayer*)ctx ;
+	int32_t duration = jplayer->thizPlayer->getDuration();
+	if( msec < 0 || msec > duration ){
+		LOGE(LOG_TAG,"native_seekTo out of range [0 %d] seekTo %d ", duration , msec );
+		return ;
+	}
+	jplayer->thizPlayer->seekTo(msec);
 }
 
 static void JNICALL native_stop(JNIEnv *env, jobject thiz, jlong ctx)

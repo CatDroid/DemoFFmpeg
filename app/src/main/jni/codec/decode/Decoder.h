@@ -13,6 +13,7 @@ class Decoder {
 
 protected:
     Render* mRender ;
+
 public:
     Decoder():mRender(NULL){}
 
@@ -57,6 +58,11 @@ public:
      *      需要解码的包,返回时候MyPacket packet应该已使用完毕,并还给PacketManager
      */
     virtual bool put(sp<MyPacket> packet, bool wait) = 0 ;
+
+    /*
+     * seek之后更新
+     */
+    virtual void flush( ) = 0 ;
 
     /*
      * 析构 如果已经start的话,

@@ -68,7 +68,7 @@ PacketManager::~PacketManager()
 
 
 MyPacket::MyPacket( sp<PacketManager> bm )
-        :mPts(0),mPm(bm)
+        :mPm(bm),mPts(0)
 {
     mpPacket = av_packet_alloc();
     av_init_packet(mpPacket);

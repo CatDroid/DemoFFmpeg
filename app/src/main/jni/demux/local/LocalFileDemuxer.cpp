@@ -66,8 +66,40 @@ void LocalFileDemuxer::pause() {
 }
 
 void LocalFileDemuxer::seekTo(int32_t ms) {
-	TLOGE("NO IMPLEMENT");
-	assert(false);
+	AutoMutex _l(mSeekMutex);
+
+	int idx = mVstream!=-1? mVstream : mAstream  ; // 如果有时间的话 以视频seek 因为H264需要同步到关键帧
+	const AVStream *pStream = mAvFmtCtx->streams[idx]; // a * b / c    ms / (1/90000)
+	const int64_t skips = av_rescale(ms, pStream->time_base.den, pStream->time_base.num);
+	/*
+	 * #define AVSEEK_FLAG_BYTE     2 ///< seeking based on position in bytes
+	 * #define AVSEEK_FLAG_FRAME    8 ///< seeking based on frame number  timestamp是帧号为单位
+	 *
+	 * 如果没有上述标记 就是以AV_TIME_BASE为单位 1,000,000 (也就是us).
+	 *
+	 * #define AVSEEK_FLAG_BACKWARD 1 ///< seek backward
+	 * #define AVSEEK_FLAG_ANY      4 ///< seek to any frame, even non-keyframes 不是seek到关键帧
+	 *
+	 */
+	TLOGW("try to seekTo %d by %s stream", ms ,mAvFmtCtx->streams[idx]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO?"video":"audio" );
+	int ret = avformat_seek_file(mAvFmtCtx, idx, INT64_MIN, skips/1000, INT64_MAX, 0 );
+	if(ret != 0) {
+		mSeekResult = false ;
+		mPlayer->seek_complete();
+	}else{
+		TLOGW("avformat_seek_file done !");
+		if(mVDecoder!=NULL){
+			TLOGW("flush video decoder");
+			mVDecoder->flush();
+		}
+		if(mADecoder!=NULL){
+			TLOGW("flush audio decoder");
+			mADecoder->flush();
+		}
+		mSeekResult = true ;
+		mPlayer->seek_complete();
+	}
+
 }
 
 
@@ -448,7 +480,11 @@ void LocalFileDemuxer::loop()
 		 * 对于音频  返回一定整数数量的帧(如果帧大小固定的话，e.g PCM or ADPCM data)
 		 * 			或者返回一帧(如果帧大小不固定 e.g MPEG系列audio)
 		 */
-		int ret = av_read_frame(mAvFmtCtx, pkt->packet());
+		int ret = 0 ;
+		{
+			AutoMutex _l(mSeekMutex);
+			ret = av_read_frame(mAvFmtCtx, pkt->packet());
+		}
 		if (ret < 0) {
 			if ((ret == AVERROR_EOF || avio_feof(mAvFmtCtx->pb)) && ! mEof ) {
 				TLOGD("End Of File!");

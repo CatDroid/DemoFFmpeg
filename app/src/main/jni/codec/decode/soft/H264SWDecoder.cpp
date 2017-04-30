@@ -22,13 +22,13 @@ extern "C"{
 
 CLASS_LOG_IMPLEMENT(H264SWDecoder,"H264SWDecoder");
 
-//#define TRACE_DECODE 1
+#define TRACE_DECODE 1
 
 #define MAX_PACKET_QUEUE_SIZE 20
 H264SWDecoder::H264SWDecoder():
 				mpVidCtx(NULL),mDecodedFrameSize(-1),mTimeBase(-1),
 				mEnqMux(NULL),mEnqSikCnd(NULL),mEnqSrcCnd(NULL),
-				mEnqThID(-1),mDeqThID(-1),mStop(false) {
+				mEnqThID(-1),mDeqThID(-1),mStop(false),mFlush(false),mFlush2(false) {
 	TLOGT("H264SWDecoder");
 }
 
@@ -263,6 +263,23 @@ void H264SWDecoder::stop() {
 }
 
 
+void H264SWDecoder::flush() {
+	{
+		AutoMutex l(mEnqMux);
+		TLOGW("clear pkt queue %lu" , mPktQueue.size() );
+		mPktQueue.clear();
+		mFlush = true ;
+		mEnqSrcCnd->signal();
+	}
+	{
+		AutoMutex __l(mSndRcvMux);
+		mFlush2 = true ;
+		TLOGW("avcodec_flush_buffers");
+		avcodec_flush_buffers(mpVidCtx);// 如果是同步到IDR帧,还需要清空??
+	}
+	mRender->flush(true);
+}
+
 bool H264SWDecoder::put(sp<MyPacket> packet , bool wait ){
 	while(!mStop){// 当stop()之后调用put只会立刻释放MyPacket
 		AutoMutex l(mEnqMux);
@@ -275,7 +292,13 @@ bool H264SWDecoder::put(sp<MyPacket> packet , bool wait ){
 #if TRACE_DECODE == 1
 				TLOGT("deMuxer wait for H264SWDecoder enter");
 #endif
+				mFlush = false ;
 				mEnqSrcCnd->wait(mEnqMux);
+				if(mFlush){
+					TLOGW("flush drop old pending packet pts %" PRId64 , packet->pts() );
+					return true ;// drop old
+				}
+
 #if TRACE_DECODE == 1
 				TLOGT("deMuxer wait for H264SWDecoder exit");
 #endif
@@ -286,7 +309,7 @@ bool H264SWDecoder::put(sp<MyPacket> packet , bool wait ){
 		}
 		mPktQueue.push_back(packet);
 		mEnqSikCnd->signal();
-		TLOGT("H264SWDecoder pending AVPacket %lu" , mPktQueue.size() );
+		TLOGT("pending AVPacket %lu" , mPktQueue.size() );
 		return true ;
 	}
 	return false ;// 已经stop()
@@ -385,6 +408,12 @@ void H264SWDecoder::enqloop(){
 				TLOGW("End Of file, try send Empty Packet to Decoder");
 				ret = avcodec_send_packet(mpVidCtx,NULL);
 			}else{
+				if(mFlush2){
+					TLOGW("mFlush2 = true drop packet %" PRId64 , avpkt->pts );
+					mFlush2 = false ;
+					continue ;
+				}
+
 				/*
 				 * 耗时点: <49ms@1080P ?? 为什么阻塞??
 				 * ff_thread_decode_frame @ pthread_frame.c 如果没有线程空闲的话,这里会有条件变量等待
@@ -425,7 +454,7 @@ void H264SWDecoder::enqloop(){
 				// H264 codec的receive_frame和send_packet都是空的
 				//TLOGT("receive_frame %p send_packet %p " ,  mpVidCtx->codec->receive_frame , mpVidCtx->codec->send_packet );
 #endif
-				//usleep(5000);
+				//usleep(5000);// 避免解码线程占用率高
 			}break;
 			case AVERROR(EAGAIN) :{
 				// TODO 两个条件变量
@@ -646,6 +675,7 @@ void H264SWDecoder::deqloop(){
 			}break;
 		}
 	}
+	TLOGW("deqloop exit");
 
 	av_frame_free(&pFrame);
 }

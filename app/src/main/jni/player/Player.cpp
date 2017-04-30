@@ -23,7 +23,7 @@ extern JNIDragonPlayer gJNIDragonPlayer ;
 
 Player::Player(JNIEnv* env , jobject jWeakRef):mjObjWeakRef(NULL),mWindow(NULL),
                  mDeMuxer(NULL),mVDecoder(NULL),mADecoder(NULL),mRender(NULL),
-        mState(STATE::UNINIT),mStop(false),
+        mState(STATE::UNINIT),mSeekState(STATE::UNINIT),mStop(false),
         mCmdMutex(NULL),mCmdCond(NULL),
         mSeekToMs(-1){
     mjObjWeakRef = env->NewGlobalRef(jWeakRef);
@@ -127,6 +127,10 @@ void Player::play_complete() {
 
 void Player::pause_complete(){
     sendEvent( EVENT::CMD_PAUSE_COMPLETE);
+}
+
+void Player::seek_complete(){
+    sendEvent( EVENT::CMD_SEEK_COMPLETE);
 }
 
 Player::~Player()
@@ -346,7 +350,6 @@ void Player::loop(void* ctx  )
 
             }break;
             case STATE::PLAYING:{
-
                 if(cmd == EVENT::CMD_PAUSE){
                     setState(STATE::PAUSING);
                     mDeMuxer->pause();
@@ -360,7 +363,10 @@ void Player::loop(void* ctx  )
                     notify(jenv,MEDIA_PLAY_COMPLETED);
                 }else if(cmd == EVENT::CMD_STOP){
                     _stop();
-                    mStop = true ; // 退出线程
+                }else if(cmd == EVENT::CMD_SEEK){
+                    mSeekState = mState ;
+                    setState(STATE::SEEKING);
+                    mDeMuxer->seekTo(mSeekToMs);
                 }
             }break;
             case STATE::PAUSING:{
@@ -377,7 +383,10 @@ void Player::loop(void* ctx  )
                     setState(STATE::PLAYING);
                 }else if(cmd == EVENT::CMD_STOP){
                     _stop();
-                    mStop = true ; // 退出线程
+                }else if(cmd == EVENT::CMD_SEEK){
+                    mSeekState = mState ;
+                    setState(STATE::SEEKING);
+                    mDeMuxer->seekTo(mSeekToMs);
                 }
             }break;
             case STATE::STOPPING:{
@@ -387,7 +396,20 @@ void Player::loop(void* ctx  )
                 TLOGW("STOPPED status");
             }break;
             case STATE::SEEKING: {
-                TLOGW("SEEKING status");
+                if(cmd == EVENT::CMD_SEEK_COMPLETE){
+                    if ( mSeekState == STATE::PLAYING ){
+                        setState(STATE::PLAYING); // 如果上一个状态是播放 这里回到播放
+                    }else if (mSeekState == STATE::PAUSED) {
+                        setState(STATE::PAUSED);
+                    }
+                    if(mDeMuxer->getSeekResult()){
+                        notify(jenv,MEDIA_SEEK_COMPLETED);
+                    }else{
+                        notify(jenv,MEDIA_ERR_SEEK);
+                    }
+                }else if(cmd == EVENT::CMD_STOP){
+                    _stop();
+                }
             }break;
             case STATE::ERROR:{
                 TLOGW("ERROR status");
@@ -395,7 +417,6 @@ void Player::loop(void* ctx  )
             case STATE::COMPLETE:{
                 if(cmd == EVENT::CMD_STOP){
                     _stop();
-                    mStop = true ; // 退出线程
                 }
             }
             default:{
@@ -417,6 +438,7 @@ void Player::loop(void* ctx  )
 
 void Player::_stop(){
     setState(STATE::STOPPING);
+    mStop = true ; // 退出线程
     // 调用顺序 应该是 Render --> Decorder --> DeMuxer 因为后者可能挂在前者的缓冲队列上
     if(mRender != NULL ){
         TLOGW("call Render stop");
@@ -440,6 +462,7 @@ void Player::_stop(){
     delete mVDecoder;   mVDecoder = NULL;
     delete mDeMuxer ;   mDeMuxer = NULL;
     setState(STATE::STOPPED);
+
 }
 void Player::notify(JNIEnv *env, int type, int arg1 , int arg2, void *obj)
 {

@@ -132,9 +132,18 @@ public class FFmpegActivity extends Activity {
 
 						@Override
 						public boolean onError(DragonPlayer mp, int what, int extra) {
-							String msg = "播放错误 : " + what ;
-							toastMessage( msg); Log.e(TAG,msg);
-							mPlayer.stop(); mPlayer.release(); mPlayer = null;
+
+							if(what == DragonPlayer.MEDIA_ERR_SEEK){
+								String msg = "定位失败 " + what ;
+								toastMessage( msg); Log.e(TAG,msg);
+								mSb.setProgress(mPlayer.getCurrentPosition());
+								// 如果seek失败 返回原来的位置
+							}else{
+								String msg = "播放错误 : " + what ;
+								toastMessage( msg); Log.e(TAG,msg);
+								mPlayer.stop(); mPlayer.release(); mPlayer = null;
+							}
+
 							return true ;
 						}
 					});
@@ -152,7 +161,17 @@ public class FFmpegActivity extends Activity {
 							return false;
 						}
 					});
+					mPlayer.setOnSeekCompleteListener(
+							new DragonPlayer.OnSeekCompleteListener() {
+							  	@Override
+								public void onSeekComplete(DragonPlayer mp) {
+									String msg = "定位成功";
+									toastMessage( msg); Log.w(TAG,msg);
+							  	}
+						  	}
+					);
 					mPlayer.prepareAsync();
+
 				} else {
 					toastMessage("请先关闭再重新启动");
 				}
@@ -218,8 +237,8 @@ public class FFmpegActivity extends Activity {
 				// default progress is 0 ~ 100
 				// after mSb.setMax( mDuration ); progress is 0 ~ mDuration
 				if(mPlayer != null ){
-//					mPlayer.seekTo(last_change);
-//					Log.d(TAG, "seekTo " + last_change );
+					mPlayer.seekTo(last_change);
+					Log.d(TAG, "seekTo " + last_change );
 				}
 				last_change = -1 ;
 			}

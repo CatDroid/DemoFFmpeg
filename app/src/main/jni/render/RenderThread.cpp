@@ -20,13 +20,31 @@ RenderThread::RenderThread(Player* player):Render(player),mpTrack(NULL),
 		mpView(NULL),mpSwsCtx(NULL),
 		mSrcFrame(NULL),mDstFrame(NULL),mRGBSize(0),
 		mStop(false), mPause(false), mRenderTh(-1),
-		mStartSys(-1),mVidStartPts(-1),mAudStartPts(-1),mVBufingDone(false)
+		mStartSys(-1),mVidStartPts(-1),mAudStartPts(-1),mVBufingDone(false),
+		mVidFlush(false),mAudFlush(false),mLoopFlush(false)
 {
 	TLOGT("RenderThread");
 	  mLastDVTime = 0 ;
 	  mLastDATIme = 0 ;
 }
 
+
+void RenderThread::flush(bool isVideo)
+{
+	AutoMutex l(mQueMtx);
+	if(isVideo){
+		TLOGW("flush video");
+		mVidFlush = true ;
+		mVidRdrQue.clear();
+		mVQueCond.signal();
+	}else{
+		TLOGW("flush audio");
+		mAudFlush = true ;
+		mAudRdrQue.clear();
+		mAQueCond.signal();
+	}
+	mLoopFlush = true ;
+}
 
 void RenderThread::renderAudio(sp<Buffer> buf)
 {
@@ -39,7 +57,12 @@ void RenderThread::renderAudio(sp<Buffer> buf)
 		AutoMutex l(mQueMtx);
 		if( mAudRdrQue.size() >= AUDIO_RENDER_BUFFER_SIZE  ){
 			TLOGW("too much audio RenderBuffer wait!");
+			mAudFlush = false ;
 			mAQueCond.wait(mQueMtx);
+			if(mAudFlush){
+				TLOGW("flush drop old pending audio buffer pts %" PRId64 , buf->pts() );
+				return   ;// drop old
+			}
 			continue ;
 		}else{
 			TLOGT("pending Audio Queue Size %lu before", mAudRdrQue.size( ));
@@ -73,8 +96,13 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 			AutoMutex l(mQueMtx);
 			if( mVidRdrQue.size() >= VIDEO_RENDER_BUFFER_SIZE  ){
 				TLOGW("too much video RenderBuffer wait!");
+				mVidFlush = false ;
 				mVQueCond.wait(mQueMtx);
-				continue ;
+				if(mVidFlush){
+					TLOGW("flush drop old pending video buffer pts %" PRId64 , buf->pts() );
+					return   ;// drop old
+				}
+				if(mStop)break;
 			}
 			TLOGT("pending Video Queue Size %lu before", mVidRdrQue.size( ));
 			//  mVidRdrQue.size() + SurfaceView.mDisBuf.size() == mRgbBm.mTotalBuffers
@@ -159,6 +187,16 @@ void RenderThread::loop()
 
 	while( !mStop && !(audio_end&&video_end) ){
 
+		if(mLoopFlush){
+			TLOGW("loop enter flush, re sync now !");
+			vbuf = NULL;
+			abuf = NULL;
+			mStartSys = -1;
+			mVidStartPts = -1;
+			mAudStartPts = -1;
+			mVBufingDone = false ;
+			mLoopFlush = false ;
+		}
 		if(mPause){
 			AutoMutex _l(mPauseMutex);
 			if(!mPause) continue ;

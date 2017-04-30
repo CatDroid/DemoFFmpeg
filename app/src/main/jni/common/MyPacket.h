@@ -29,6 +29,12 @@ private:
 };
 
 class MyPacket : public RecycleRefBase<MyPacket> {
+
+private:
+    sp<PacketManager> mPm;
+    AVPacket* mpPacket;
+    int64_t mPts ;
+
 public:
     MyPacket(sp<PacketManager> pm);
     virtual ~MyPacket();
@@ -38,10 +44,8 @@ public:
 
 private:
     friend class PacketManager ;
-    AVPacket* mpPacket;
-    int64_t mPts ;
     void recycle();
-    sp<PacketManager> mPm;
+
 };
 
 

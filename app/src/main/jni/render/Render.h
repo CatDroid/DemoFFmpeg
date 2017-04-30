@@ -63,6 +63,11 @@ public:
     virtual void pause() = 0 ;
 
     /*
+     * seek之后
+     */
+    virtual void flush(bool isVideo) = 0 ;
+
+    /*
      * 1.获得当前播放进度 (ms)
      * 2.目前是优先使用音频的 没有音频使用视频
      */

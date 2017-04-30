@@ -54,9 +54,13 @@ private:
 	double mATimebase ;
 	int32_t mDuration ;
 
+	// 启动 暂停
 	Mutex* mStartMutex;
 	Condition* mStartCon;
 
+	// Seek
+	Mutex 	mSeekMutex ;
+	bool 	mSeekResult ;
 
 public :
 	LocalFileDemuxer(Player* player);
@@ -67,12 +71,14 @@ public :
 	virtual double getAudioTimeBase() override {return mATimebase ;}
 
 	virtual void prepareAsyn() override ; // player.notify();
+	virtual bool getParseResult() override {return mParseResult;}
 	virtual void play() override ;
 	virtual void pause()override ;
 	virtual int32_t getDuration() override ; // ms
 	virtual void seekTo(int32_t ms) override ;
+	virtual bool getSeekResult() override { return mSeekResult ; }
 	virtual void stop() override;
-	virtual bool getParseResult() override {return mParseResult;}
+
 
 public:
 	//无论是SPS PPS VPS ESDS都带有引导头 00 00 00 01

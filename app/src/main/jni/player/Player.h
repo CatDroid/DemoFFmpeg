@@ -42,6 +42,7 @@ public:
         CMD_PAUSE,
         CMD_PAUSE_COMPLETE,
         CMD_SEEK,
+        CMD_SEEK_COMPLETE,
         CMD_STOP,
         CMD_PLAY_COMPLETE,
     };
@@ -56,6 +57,7 @@ private:
     Render*  mRender ;
 
     STATE mState  ;
+    STATE mSeekState;
     bool mStop ;
     std::list<EVENT> mCmdQueue;
     Mutex* mCmdMutex;
@@ -87,7 +89,9 @@ public:
     // 内部调用接口
     virtual void prepare_result();  //  Muxer
     virtual void pause_complete();  //  Muxer
+    virtual void seek_complete();   //  Muxer
     virtual void play_complete();   //  Render
+
 
 
     // 通知应用层接口

@@ -61,6 +61,9 @@ private:
 	Condition mVQueCond ;	// 视频队列已经有空位
 	Condition mAQueCond ;	// 音频队列已经有空位
 	Condition mSrcCond ;	// 有新的数据加入Audio/Video队列
+	bool mVidFlush;
+	bool mAudFlush; 		// 在队列满等待时候 出现了seek/flush
+	bool mLoopFlush ;
 	sp<BufferManager> mRgbBm;
 
 	// 调试
@@ -79,6 +82,7 @@ public:
 	// Render接口
 	void renderAudio(sp<Buffer> buf) override;
 	void renderVideo(sp<Buffer> buf) override;
+	void flush(bool isVideo) override;
 	void start() override ;
 	void stop() override ;
 	void pause() override ;
