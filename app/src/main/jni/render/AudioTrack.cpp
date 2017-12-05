@@ -12,6 +12,7 @@
 
 #include "AudioTrack.h"
 
+//#define TRACE_AUDIO_TRACK  1
 //#define SAVE_DECODE_TO_FILE
 
 #define AUDIO_RENDER_BUFFER_SIZE 10
@@ -178,7 +179,9 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 	while(!mStop ){
 		AutoMutex l(mBufMux);
 		if(mBuf.empty()){
+#if TRACE_AUDIO_TRACK == 1
 			ALOGD("playerCallback:wait ");
+#endif
 			if(mStop) continue ;
 			mBufCon->wait(mBufMux);
 			continue ;
@@ -206,6 +209,7 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 	SLAndroidSimpleBufferQueueState state ;
 	(*mIPlayerBufferQueue)->GetState(mIPlayerBufferQueue , &state);
 
+#if TRACE_AUDIO_TRACK == 1
 	ALOGD("play %p Enqueue %d state count %d index %d " , playbuf.get() ,playbuf->size() , state.count , state.index );
 	ALOGD("%02x %02x %02x %02x %02x %02x " ,
 		  playbuf->data()[0],
@@ -214,6 +218,7 @@ void AudioTrack::playerCallback(SLAndroidSimpleBufferQueueItf bq )
 		  playbuf->data()[3],
 		  playbuf->data()[4],
 		  playbuf->data()[5]);
+#endif
 	SLresult result;
 
 

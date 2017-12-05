@@ -103,8 +103,8 @@ public class FFmpegActivity extends Activity {
 					mPlayer = new DragonPlayer();
 					mPlayer.setSurface(mSh.getSurface());
 					//mPlayer.setDataSource("file:///mnt/sdcard/screen_mic_main_r30_g30_ultrafast_c2_44k_6000K_128K_yuv444.mp4");
-					//mPlayer.setDataSource("file:///mnt/sdcard/1080p60fps.mp4");
-					mPlayer.setDataSource("file:///mnt/sdcard/test.3gp");
+					mPlayer.setDataSource("file:///mnt/sdcard/1080p60fps.mp4");
+					//mPlayer.setDataSource("file:///mnt/sdcard/test.3gp");
 					mPlayer.setOnPreparedListener(new DragonPlayer.OnPreparedListener(){
 						@Override
 						public void onPrepared(DragonPlayer mp, int what) {

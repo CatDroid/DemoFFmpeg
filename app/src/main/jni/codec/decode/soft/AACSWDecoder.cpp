@@ -354,14 +354,16 @@ void AACSWDecoder::deqloop(){
 				int32_t len = swr_convert(mpSwrCtx, lineaddr, mDecodedFrameSize,
 										  (const uint8_t **) pFrame->data, pFrame->nb_samples);
 				if (len > 0) {
-					//每声道采样数 x 声道数 x 每个采样字节数
-					int resampled_data_size =
+#if TRACE_DECODE == 1
+                    //每声道采样数 x 声道数 x 每个采样字节数
+                    int resampled_data_size =
 							len * mpAudCtx->channels * av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
 					TLOGD("len = %d resampled_data_size = %d  mDecodedFrameSize = %d ",
 						  len, // 每个通道/平面的样本数
 						  resampled_data_size,
 						  mDecodedFrameSize
 					);
+#endif
 					buf->size() = mDecodedFrameSize;
 					buf->pts() = (int64_t) (pFrame->pts * 1000 * 1000 * mTimeBase ); // us
 
@@ -388,9 +390,13 @@ void AACSWDecoder::deqloop(){
 			}break;
 			case AVERROR(EAGAIN):{
 				// TODO 目前只是休眠
+#if TRACE_DECODE == 1
 				TLOGW("deqloop no output enter \n");
+#endif
 				usleep(8000);
+#if TRACE_DECODE == 1
 				TLOGW("deqloop no output exit \n");
+#endif
 			}break;
 			case AVERROR(EINVAL):{
 				TLOGE("deqloop 参数错误\n");
@@ -508,7 +514,9 @@ bool AACSWDecoder::put(sp<MyPacket> packet , bool wait ){
 		}
 		mPktQueue.push_back(packet);
 		mEnqSikCnd->signal();
+#if TRACE_DECODE == 1
 		TLOGT("pending AVPacket %lu" , mPktQueue.size() );
+#endif
 		return true ;
 	}
 	return false ;// 已经stop()

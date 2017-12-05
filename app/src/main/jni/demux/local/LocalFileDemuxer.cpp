@@ -510,11 +510,13 @@ void LocalFileDemuxer::loop()
 
 		// while [ 1 ] ; do adb shell ps -t 32058 ; sleep 1 ; done;
 		if (pkt->packet()->stream_index == mAstream  && mADecoder != NULL ) {
+#if TRACE_LOCAL_FILE_DEMUXER == 1
 			TLOGD("audio dts = %ld , pts=%f,dts=%f,duration %f" ,
 				  pkt->packet()->dts ,
 				  pkt->packet()->pts * mATimebase ,
 				  pkt->packet()->dts * mATimebase ,
 				  pkt->packet()->duration* mATimebase  );
+#endif
 			//pkt->pts = pkt->pts * audio_timebase * 1000  ; // 强制改变时间戳 ms
 			mADecoder->put(pkt , true );
 
@@ -524,11 +526,13 @@ void LocalFileDemuxer::loop()
 			 * video dts = -1502 , pts=0.000000,dts=-0.016689,duration 0.016678
 			 * video dts = 0 , pts=0.016689,dts=0.000000,duration 0.016678
 			 * */
+#if TRACE_LOCAL_FILE_DEMUXER == 1
 			TLOGD("video dts = %ld , pts=%f,dts=%f,duration %f" ,
 				  pkt->packet()->dts ,
 				  pkt->packet()->pts * mVTimebase ,
 				  pkt->packet()->dts * mVTimebase ,
 				  pkt->packet()->duration* mVTimebase );
+#endif
 			//pkt->dts = pkt->dts * video_timebase * 1000 ;
 			//pkt->pts  = pkt->pts * video_timebase * 1000  ; // 强制改变时间戳 ms
 			mVDecoder->put(pkt,true);

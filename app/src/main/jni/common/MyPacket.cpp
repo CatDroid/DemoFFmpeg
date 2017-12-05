@@ -23,7 +23,9 @@ sp<MyPacket> PacketManager::pop()
         // catch (bad_alloc new_error){
         //
         //}
+#if  TRACE_PACKET_MANAGER  == 1
         ALOGD("%p new one packet %p" , this , pbuf );
+#endif
         mTotalPackets.push_back(pbuf);
         return pbuf ;
     }else{
@@ -41,10 +43,14 @@ void PacketManager::push(MyPacket *pbuf)
     //      mFreePackets.size() ,mTotalPackets.size(), mMaxPackets , this->ref_count() );
     if(mFreePackets.size() >= mMaxPackets ){
         mTotalPackets.remove(pbuf);
+#if  TRACE_PACKET_MANAGER  == 1
         ALOGD("%p free one packet %p [FULL]" , this , pbuf );
+#endif
         delete pbuf; // 导致析构  MyPacket.mPm 在这里 = NULL 所以不能返回后调用 mPm = NULL ;
     }else{
+#if  TRACE_PACKET_MANAGER  == 1
         ALOGD("%p put to freePackets %p [before size %lu] " ,this , pbuf , mFreePackets.size() );
+#endif
         mFreePackets.push_back(pbuf);
         pbuf->mPm = NULL ; //  已经把MyPacket还给 PacketManager  取消对PacketManager的引用
     }
@@ -57,7 +63,9 @@ PacketManager::~PacketManager()
           it != mTotalPackets.end(); it++)
     {
         MyPacket *pbuf = *it;
+#if  TRACE_PACKET_MANAGER  == 1
         ALOGD("%p deconstructor free one packet %p" , this ,pbuf );
+#endif
         delete pbuf;
     }
     ALOGD("%p deconstructor done" , this );

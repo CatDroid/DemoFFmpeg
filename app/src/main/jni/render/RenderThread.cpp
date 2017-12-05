@@ -14,7 +14,7 @@ CLASS_LOG_IMPLEMENT(RenderThread,"RenderThread");
 #define VIDEO_RENDER_BUFFER_SIZE 30
 #define AUDIO_RENDER_BUFFER_SIZE 46
 
-
+//#define TRACE_RENDER_THREAD 1
 
 RenderThread::RenderThread(Player* player):Render(player),mpTrack(NULL),
 		mpView(NULL),mpSwsCtx(NULL),
@@ -65,7 +65,9 @@ void RenderThread::renderAudio(sp<Buffer> buf)
 			}
 			continue ;
 		}else{
+#if TRACE_RENDER_THREAD == 1
 			TLOGT("pending Audio Queue Size %lu before", mAudRdrQue.size( ));
+#endif
 			mAudRdrQue.push_back(buf);
 			if(mAudRdrQue.size() == 1){
 				mSrcCond.signal();
@@ -95,7 +97,9 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 		{
 			AutoMutex l(mQueMtx);
 			if( mVidRdrQue.size() >= VIDEO_RENDER_BUFFER_SIZE  ){
+#if TRACE_RENDER_THREAD == 1
 				TLOGW("too much video RenderBuffer wait!");
+#endif
 				mVidFlush = false ;
 				mVQueCond.wait(mQueMtx);
 				if(mVidFlush){
@@ -104,7 +108,9 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 				}
 				if(mStop)break;
 			}
+#if TRACE_RENDER_THREAD == 1
 			TLOGT("pending Video Queue Size %lu before", mVidRdrQue.size( ));
+#endif
 			//  mVidRdrQue.size() + SurfaceView.mDisBuf.size() == mRgbBm.mTotalBuffers
 			//  如果不能及时显示  SurfaceView.mDisBuf.size()可能增大,
 			//  导致 虽然mVidRdrQue不超过VIDEO_RENDER_BUFFER_SIZE=30 但是 mRgbBm.mTotalBuffers 可能超过 30
@@ -148,8 +154,11 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 //			int64_t diff = now - mLastDVTime;// us
 //			if( diff > 16000) TLOGW("video decoder too slow ! %" PRId64 " us", diff-16000);
 //			mLastDVTime = now ;// 可能受到这里pending的影响 (mVidRdrQue.size() >= VIDEO_RENDER_BUFFER_SIZE)
-
+#if TRACE_RENDER_THREAD == 1
 			TLOGT("output slice height %d ,  RGBA height %d cost %" PRId64 , ret , buf->height(),cost.Get() );
+#else
+            (void)ret;
+#endif
 
 			//TLOGD("linesize[0] = %d , mRGBSize = %d " ,mDstFrame->linesize[0] * buf->height() , mRGBSize );
 
@@ -165,7 +174,9 @@ void RenderThread::renderVideo(sp<Buffer> buf)
 			if(mVidRdrQue.size() == 1 || !mVBufingDone){
 				mSrcCond.signal();
 			}
-			TLOGT("pending Video Queue Size %lu after", mVidRdrQue.size( ));
+#if TRACE_RENDER_THREAD == 1
+            TLOGT("pending Video Queue Size %lu after", mVidRdrQue.size( ));
+#endif
 		}
 
 		break;
@@ -218,7 +229,9 @@ void RenderThread::loop()
 					TLOGW("video end");
 					continue;
 				}
+#if TRACE_RENDER_THREAD == 1
 				TLOGT("get Video %lu", mVidRdrQue.size());
+#endif
 			}
 
 			if( abuf.get() == NULL && ! mAudRdrQue.empty() ){
@@ -231,7 +244,9 @@ void RenderThread::loop()
 					TLOGW("audio end");
 					continue;
 				}
+#if TRACE_RENDER_THREAD == 1
 				TLOGT("get Audio %lu", mAudRdrQue.size() );
+#endif
 			}
 
 			if(mVidStartPts == -1 || mAudStartPts ==-1 ){
@@ -259,12 +274,13 @@ void RenderThread::loop()
 		if( mAudStartPts == -1 && abuf.get() != NULL ) mAudStartPts = abuf->pts();
 		if( mStartSys == -1 ) mStartSys = nowus;
 
-
+#if TRACE_RENDER_THREAD == 1
 		TLOGT("vs=%" PRId64 ",as=%" PRId64 ",vbuf=%p(%" PRId64 "),abuf=%p(%" PRId64 "),pos=%" PRId64 " us" ,
 			  mVidStartPts , mAudStartPts ,
 			  vbuf.get() , (vbuf.get()==NULL)?-111:vbuf.get()->pts(),
 			  abuf.get() , (abuf.get()==NULL)?-111:abuf.get()->pts(),
 			  nowus - mStartSys );
+#endif
 
 
 		uint8_t rwho = 0 ; // 0:audio 1:video 2:both
@@ -290,7 +306,9 @@ void RenderThread::loop()
 
 		if( delayus > 1000 ){ // 1ms
 			{
+#if TRACE_RENDER_THREAD == 1
 				TLOGT("wait %" PRId64 " us for %d " ,((uint64_t) delayus - 1000), rwho);
+#endif
 				AutoMutex l(mQueMtx);
 				mSrcCond.waitRelative(mQueMtx , (((uint64_t) delayus - 1000) * 1000));
 			}
@@ -301,15 +319,19 @@ void RenderThread::loop()
 
 
 		if( rwho == 0 || rwho == 2){
+#if TRACE_RENDER_THREAD == 1
 			TLOGD("write audio size %d pts %" PRId64 , abuf->size() , abuf->pts());
+#endif
 			mpTrack->write(abuf);
 			abuf = NULL ;
 		}
 
 		if( rwho == 1 || rwho == 2 ){
+#if TRACE_RENDER_THREAD == 1
 			TLOGD("draw buffer %p w %d h %d size %d pts[A:%" PRId64 " V:%" PRId64 " ] A-V %" PRId64 " us " ,
 				  vbuf.get(), vbuf->width(), vbuf->height() , vbuf->size() ,
 				  mpTrack->pts() ,  vbuf->pts() , (mpTrack->pts() - vbuf->pts()) );
+#endif
 			if(mpView == NULL){
 				TLOGW("window is NOT set, but get VIDEO frame!");
 			}else{

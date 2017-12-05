@@ -9,7 +9,10 @@ android {
 
         externalNativeBuild {
             ndkBuild {
-                cFlags "-D__STDC_CONSTANT_MACROS","-std=c11","-O3","-Werror","-Wall"
+                cFlags "-D__STDC_CONSTANT_MACROS","-std=c11","-O3","-Werror","-Wall"//,
+                        //"-DTRACE_LOCAL_FILE_DEMUXER=1",
+                        // "-DTRACE_VIDEO_DECODE=1", "-DTRACE_AUDIO_TRACK=1",
+                        // "-DTRACE_PACKET_MANAGER=1","-DTRACE_BUFFER_MANAGER=1",
                 cppFlags "-std=c++11","-Wall","-fno-exceptions","-fno-rtti","-O3","-Werror","-Wall"
             }
         }
@@ -66,7 +69,6 @@ android {
         libarmeabi7aFlavors {
             externalNativeBuild {
                 ndkBuild {
-
                     targets 'demo_ffmpeg'
                 }
                 ndk {

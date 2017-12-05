@@ -1,8 +1,8 @@
 
 ###################################################################################
 LOCAL_PATH := $(call my-dir)
-FFMPEG_LIB_ROOT_PATH := /home/hanlon/Cat6/git_qq_yun/ffmpeg/android/
-
+#FFMPEG_LIB_ROOT_PATH := /home/hanlon/Cat6/git_qq_yun/ffmpeg/android/
+FFMPEG_LIB_ROOT_PATH := X:\\OpenSource\\ffmpeg\\android
 include $(CLEAR_VARS)
 LOCAL_MODULE    := avcodec
 LOCAL_SRC_FILES := $(FFMPEG_LIB_ROOT_PATH)/$(TARGET_ARCH_ABI)/lib/libavcodec.so
